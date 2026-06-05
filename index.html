@@ -626,24 +626,25 @@ function saveEditRow(id) {
 // =============================================
 //  組み込みマスタの種別変更（ユーザーマスタに上書き登録）
 // =============================================
-function editBuiltinRow(name) {
-  var curType = SPECIES_MASTER[name] || 'E';
-  var safeId  = 'brow-' + name.replace(/[^\w]/g,'_');
+function editBuiltinRow(name, rowIndex) {
+  var safeId = 'brow-' + rowIndex;
   var row = document.getElementById(safeId);
   if (!row) return;
+  var curType = SPECIES_MASTER[name] || 'E';
+  var selId = 'btype-' + rowIndex;
   var cells = row.querySelectorAll('td');
-  cells[1].innerHTML = '<select id="edit-btype" style="padding:4px 6px;border:1.5px solid var(--green-light);border-radius:4px;font-size:0.82rem;">'
+  cells[1].innerHTML = '<select id="' + selId + '" style="padding:4px 6px;border:1.5px solid var(--green-light);border-radius:4px;font-size:0.82rem;">'
     + ['E','D','C','L'].map(function(c){ return '<option value="'+c+'"'+(c===curType?' selected':'')+'>'+TYPE_CODE_LABEL[c]+'</option>'; }).join('')
     + '</select>';
-  cells[4].innerHTML = '<button class="btn-primary btn-sm" onclick="saveBuiltinRow(\'' + escJs(name) + '\')">保存</button>'
-    + ' <button class="btn-secondary btn-sm" onclick="renderMasterTable()">\u53d6\u6d88</button>';
+  cells[4].innerHTML = '<button class="btn-primary btn-sm" onclick="saveBuiltinRow(\'' + escJs(name) + '\',\'' + selId + '\')">保存</button>'
+    + ' <button class="btn-secondary btn-sm" onclick="renderMasterTable()">取消</button>';
 }
 
-function saveBuiltinRow(name) {
-  var sel = document.getElementById('edit-btype');
+function saveBuiltinRow(name, selId) {
+  var sel = document.getElementById(selId);
   if (!sel) return;
-  dbAddUserSpecies({ name: name, typeCode: sel.value, note: '\u7d44\u307f\u8fbc\u307f\u3088\u308a\u5909\u66f4', date: new Date().toISOString() }, function() {
-    loadUserSpeciesCache(function() { renderMasterTable(); toast('✅ \u300c' + name + '\u300d\u306e\u7a2e\u5225\u3092\u5909\u66f4\u3057\u307e\u3057\u305f'); });
+  dbAddUserSpecies({ name: name, typeCode: sel.value, note: '組み込みより変更', date: new Date().toISOString() }, function() {
+    loadUserSpeciesCache(function() { renderMasterTable(); toast('✅ 「' + name + '」の種別を変更しました'); });
   });
 }
 
@@ -693,16 +694,18 @@ function renderMasterTable() {
       var col   = TYPE_BADGE_COLOR[r.typeCode] || '#555';
       var lbl   = TYPE_CODE_LABEL[r.typeCode]  || r.typeCode;
       var bg    = i % 2 === 0 ? 'background:var(--gray-1)' : '';
-      var rowId = r.source === 'user' ? ('mrow-' + r.id) : ('brow-' + r.name.replace(/[^\w]/g,'_'));
+      // rowIdはインデックスベース（日本語文字を\wで置換すると衝突するため）
+      var rowId = r.source === 'user' ? ('mrow-' + r.id) : ('brow-' + i);
       var dataA = r.source === 'user'
-        ? 'data-name="'+escAttr(r.name)+'" data-type="'+r.typeCode+'" data-note="'+escAttr(r.note)+'"' : '';
+        ? 'data-name="'+escAttr(r.name)+'" data-type="'+r.typeCode+'" data-note="'+escAttr(r.note)+'"'
+        : 'data-name="'+escAttr(r.name)+'" data-type="'+r.typeCode+'"';
       var srcBadge = r.source === 'user'
         ? '<span style="font-size:0.68rem;background:#e8f5e9;color:#2d6a4f;border:1px solid #a5d6a7;padding:1px 5px;border-radius:4px;">\u8ffd\u52a0</span>'
         : '<span style="font-size:0.68rem;background:#f1f5f9;color:var(--gray-3);border:1px solid var(--gray-2);padding:1px 5px;border-radius:4px;">\u7d44\u8fbc</span>';
       var ops = r.source === 'user'
         ? '<button class="btn-primary btn-sm" onclick="startEditRow('+r.id+')">\u7de8\u96c6</button>'
           + ' <button class="btn-danger btn-sm" onclick="deleteUserSpecies('+r.id+',\''+escJs(r.name)+'\')">\u524a\u9664</button>'
-        : '<button class="btn-secondary btn-sm" onclick="editBuiltinRow(\''+escJs(r.name)+'\')">\u7a2e\u5225\u5909\u66f4</button>';
+        : '<button class="btn-secondary btn-sm" onclick="editBuiltinRow(\''+escJs(r.name)+'\','+i+')">\u7a2e\u5225\u5909\u66f4</button>';
       html += '<tr id="'+rowId+'" style="'+bg+'" '+dataA+'>'
         + '<td style="padding:6px 10px;font-weight:700;">'+escHtml(r.name)+'</td>'
         + '<td style="padding:6px 10px;"><span style="background:'+col+';color:#fff;font-size:0.72rem;padding:2px 8px;border-radius:10px;">'+escHtml(lbl)+'</span></td>'
