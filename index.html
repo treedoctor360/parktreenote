@@ -1128,7 +1128,7 @@ function buildSummary(park) {
     }
     if (stype === 'L') {
       var key2 = 'L|' + rank;
-      if (!buckets[key2]) buckets[key2] = { typeCode:'L', kou:'低木剪定', type:'低木(手刈)寄植え', rank: rank, qty: 0, speciesList: [] };
+      if (!buckets[key2]) buckets[key2] = { typeCode:'L', kou:'低木剪定', type:'低木(機)寄植え', rank: rank, qty: 0, speciesList: [] };
       buckets[key2].qty += qty;
       buckets[key2].speciesList.push(r.species + '×' + qty);
       return;
@@ -1239,7 +1239,7 @@ function renderSummaryTable(buckets, m2buckets, bassaiBuckets, unknownSpecies) {
     var b = m2buckets[k];
     html += '<tr style="' + bg() + '">'
       + '<td style="padding:6px 10px;">低木剪定</td>'
-      + '<td style="padding:6px 10px;">低木(手刈)寄植え ' + escHtml(b.hRank) + '</td>'
+      + '<td style="padding:6px 10px;">低木(機)寄植え ' + escHtml(b.hRank) + '</td>'
       + '<td style="padding:6px 10px;text-align:right;font-weight:700;">' + b.area.toFixed(2) + '</td>'
       + '<td style="padding:6px 10px;">m2</td>'
       + '</tr>';
@@ -1281,7 +1281,7 @@ function buildTransferText(buckets, m2buckets, bassaiBuckets) {
   Object.keys(m2buckets).forEach(function(k) {
     var b = m2buckets[k];
     var memo = (b.speciesList || []).join('、');
-    lines.push('低木剪定\t低木(手刈)寄植え ' + b.hRank + '\tm2\t' + b.area.toFixed(2) + '\t' + memo);
+    lines.push('低木剪定\t低木(機)寄植え ' + b.hRank + '\tm2\t' + b.area.toFixed(2) + '\t' + memo);
   });
   Object.keys(bassaiBuckets).forEach(function(k) {
     var b = bassaiBuckets[k];
