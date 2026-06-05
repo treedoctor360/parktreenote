@@ -1124,17 +1124,18 @@ function buildSummary(park) {
       return;
     }
     if (stype === 'L') {
-      // 低木で本数管理の場合はそのまま低木として集計
       var key2 = 'L|' + rank;
-      if (!buckets[key2]) buckets[key2] = { typeCode:'L', kou:'低木剪定', type:'低木(手刈)寄植え', rank: rank, qty: 0 };
+      if (!buckets[key2]) buckets[key2] = { typeCode:'L', kou:'低木剪定', type:'低木(手刈)寄植え', rank: rank, qty: 0, speciesList: [] };
       buckets[key2].qty += qty;
+      buckets[key2].speciesList.push(r.species + '×' + qty);
       return;
     }
     var kt = TYPE_TO_KOU[stype];
     if (!kt) return;
     var key = stype + '|' + rank;
-    if (!buckets[key]) buckets[key] = { typeCode: stype, kou: kt.kou, type: kt.type, rank: rank, qty: 0 };
+    if (!buckets[key]) buckets[key] = { typeCode: stype, kou: kt.kou, type: kt.type, rank: rank, qty: 0, speciesList: [] };
     buckets[key].qty += qty;
+    buckets[key].speciesList.push(r.species + '×' + qty);
   });
 
   // === m2集計 ===
@@ -1143,10 +1144,10 @@ function buildSummary(park) {
     var m = (r.memo || '').match(/([\d.]+)\s*m2/i);
     var area = m ? parseFloat(m[1]) : 0;
     if (!area) return;
-    // 樹高ランク取得
     var hRank = getHeightRank(r);
-    if (!m2buckets[hRank]) m2buckets[hRank] = { hRank: hRank, area: 0 };
+    if (!m2buckets[hRank]) m2buckets[hRank] = { hRank: hRank, area: 0, speciesList: [] };
     m2buckets[hRank].area += area;
+    m2buckets[hRank].speciesList.push(r.species + '(' + area + 'm2)');
   });
 
   // === 伐採集計 ===
@@ -1155,8 +1156,9 @@ function buildSummary(park) {
     var rank = normalizeGirthRank(r.girth);
     var qty  = parseInt(r.qty) || 1;
     var key  = rank || '規格不明';
-    if (!bassaiBuckets[key]) bassaiBuckets[key] = { rank: key, qty: 0 };
+    if (!bassaiBuckets[key]) bassaiBuckets[key] = { rank: key, qty: 0, speciesList: [] };
     bassaiBuckets[key].qty += qty;
+    bassaiBuckets[key].speciesList.push(r.species + '×' + qty);
   });
 
   // テーブルとテキストを描画
@@ -1252,20 +1254,23 @@ function renderSummaryTable(buckets, m2buckets, bassaiBuckets, unknownSpecies) {
 //    手動転記しやすいよう「工種 / 種類規格 / 単位 / 数量」の一覧形式にする
 function buildTransferText(buckets, m2buckets, bassaiBuckets) {
   var lines = [];
-  lines.push('【v10-49 転記用】工種 / 種類・規格 / 単位 / 数量');
+  lines.push('【v10-49 転記用】工種 / 種類・規格 / 単位 / 数量 / 摘要');
   lines.push('----------------------------------------');
 
   Object.keys(buckets).sort().forEach(function(k) {
     var b = buckets[k];
-    lines.push(b.kou + '\t' + b.type + ' ' + b.rank + '\t本\t' + b.qty);
+    var memo = (b.speciesList || []).join('、');
+    lines.push(b.kou + '\t' + b.type + ' ' + b.rank + '\t本\t' + b.qty + '\t' + memo);
   });
   Object.keys(m2buckets).forEach(function(k) {
     var b = m2buckets[k];
-    lines.push('低木剪定\t低木(手刈)寄植え ' + b.hRank + '\tm2\t' + b.area.toFixed(2));
+    var memo = (b.speciesList || []).join('、');
+    lines.push('低木剪定\t低木(手刈)寄植え ' + b.hRank + '\tm2\t' + b.area.toFixed(2) + '\t' + memo);
   });
   Object.keys(bassaiBuckets).forEach(function(k) {
     var b = bassaiBuckets[k];
-    lines.push('樹木伐採\t機械伐採 ' + b.rank + '\t本\t' + b.qty);
+    var memo = (b.speciesList || []).join('、');
+    lines.push('樹木伐採\t機械伐採 ' + b.rank + '\t本\t' + b.qty + '\t' + memo);
   });
 
   document.getElementById('transfer-text').value = lines.join('\n');
