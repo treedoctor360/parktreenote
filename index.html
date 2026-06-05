@@ -233,8 +233,9 @@ table.preview-tbl {
 
   <!-- ===== 入力モード切替タブ ===== -->
   <div class="input-mode-tabs">
-    <div class="mode-tab active" id="tab-text" onclick="switchMode('text')">📋 テキスト一括入力</div>
-    <div class="mode-tab"        id="tab-form" onclick="switchMode('form')">✏️ フォーム入力</div>
+    <div class="mode-tab active" id="tab-text"   onclick="switchMode('text')">📋 テキスト一括入力</div>
+    <div class="mode-tab"        id="tab-form"   onclick="switchMode('form')">✏️ フォーム入力</div>
+    <div class="mode-tab"        id="tab-master" onclick="switchMode('master')">🌿 樹種マスタ</div>
   </div>
 
   <!-- ===== テキスト一括入力パネル ===== -->
@@ -302,6 +303,53 @@ table.preview-tbl {
         </div>
       </div>
       <button class="btn-primary" style="width:100%;padding:10px" onclick="saveForm()">＋ 追加</button>
+    </div>
+  </div>
+
+  <!-- ===== 樹種マスタパネル ===== -->
+  <div id="panel-master" style="display:none;">
+    <div style="background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:16px;">
+      <div style="font-size:0.9rem;font-weight:700;color:var(--green-dark);margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--green-pale);">
+        🌿 ユーザー追加樹種マスタ
+        <span style="font-size:0.75rem;font-weight:normal;color:var(--gray-3);margin-left:8px;">追加した樹種は自動判定・集計に反映されます</span>
+      </div>
+
+      <!-- 追加フォーム -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;padding:10px;background:var(--green-pale);border-radius:8px;">
+        <div>
+          <label style="display:block;font-size:0.75rem;font-weight:700;color:var(--green-dark);margin-bottom:3px;">樹種名 <span style="color:#d64040;">*</span></label>
+          <input type="text" id="nm-species" placeholder="例: ヤマナラシ"
+            style="padding:7px 9px;border:1.5px solid var(--gray-2);border-radius:6px;font-size:0.88rem;width:140px;background:#fff;">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.75rem;font-weight:700;color:var(--green-dark);margin-bottom:3px;">種別 <span style="color:#d64040;">*</span></label>
+          <select id="nm-stype" style="padding:7px 9px;border:1.5px solid var(--gray-2);border-radius:6px;font-size:0.88rem;background:#fff;width:130px;">
+            <option value="">選択してください</option>
+            <option value="E">常緑広葉樹</option>
+            <option value="D">落葉広葉樹</option>
+            <option value="C">針葉樹</option>
+            <option value="L">低木</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.75rem;font-weight:700;color:var(--green-dark);margin-bottom:3px;">備考</label>
+          <input type="text" id="nm-note" placeholder="例: ポプラ科"
+            style="padding:7px 9px;border:1.5px solid var(--gray-2);border-radius:6px;font-size:0.88rem;width:130px;background:#fff;">
+        </div>
+        <button class="btn-primary" style="padding:8px 16px;" onclick="addUserSpecies()">＋ 追加</button>
+      </div>
+
+      <!-- ユーザーマスタ一覧 -->
+      <div id="user-master-list"></div>
+
+      <!-- 組み込みマスタ（折りたたみ） -->
+      <div style="margin-top:14px;">
+        <button onclick="toggleBuiltinMaster(this)"
+          style="background:none;border:none;font-size:0.8rem;color:var(--gray-3);cursor:pointer;padding:4px 0;">
+          ▶ 組み込みマスタを表示（読み取り専用）
+        </button>
+        <div id="builtin-master-list" style="display:none;margin-top:8px;"></div>
+      </div>
     </div>
   </div>
 
@@ -448,21 +496,174 @@ function quickSetSentei(id, sentei) {
   };
 }
 
+
+// =============================================
+//  ユーザー追加樹種マスタ
+//  IndexedDBの 'userSpecies' ストアに保存
+//  形式: { id(auto), name, typeCode, note, date }
+// =============================================
+var USER_SPECIES_STORE = 'userSpecies';
+
+// DB初期化時にuserSpeciesストアも作成（DB_VERをインクリメント）
+// ※ 既存DBがある場合は onupgradeneeded が再度呼ばれる必要あり
+// initDBのonupgradeneededに追記するため、initDB内でstoreを追加
+
+// ユーザーマスタを全件取得
+function dbGetAllUserSpecies(cb) {
+  if (!db.objectStoreNames.contains(USER_SPECIES_STORE)) { cb([]); return; }
+  db.transaction(USER_SPECIES_STORE, 'readonly').objectStore(USER_SPECIES_STORE).getAll()
+    .onsuccess = function(e) { cb(e.target.result || []); };
+}
+function dbAddUserSpecies(rec, cb) {
+  var req = db.transaction(USER_SPECIES_STORE, 'readwrite').objectStore(USER_SPECIES_STORE).add(rec);
+  req.onsuccess = function() { cb && cb(req.result); };
+}
+function dbDeleteUserSpecies(id, cb) {
+  db.transaction(USER_SPECIES_STORE, 'readwrite').objectStore(USER_SPECIES_STORE).delete(id)
+    .onsuccess = function() { cb && cb(); };
+}
+
+// ユーザーマスタをメモリにキャッシュ（起動時とCRUD後に更新）
+var userSpeciesCache = {};
+
+function loadUserSpeciesCache(cb) {
+  dbGetAllUserSpecies(function(list) {
+    userSpeciesCache = {};
+    list.forEach(function(item) { userSpeciesCache[item.name] = item.typeCode; });
+    if (cb) cb();
+  });
+}
+
+// getSpeciesType をユーザーマスタも参照するよう上書き
+var _origGetSpeciesType = getSpeciesType;
+function getSpeciesType(species) {
+  if (!species) return null;
+  // ユーザーマスタを優先
+  if (userSpeciesCache[species]) return userSpeciesCache[species];
+  // 部分一致でユーザーマスタを検索
+  var keys = Object.keys(userSpeciesCache);
+  for (var i = 0; i < keys.length; i++) {
+    if (species.indexOf(keys[i]) >= 0 || keys[i].indexOf(species) >= 0) {
+      return userSpeciesCache[keys[i]];
+    }
+  }
+  // 組み込みマスタ
+  return _origGetSpeciesType(species);
+}
+
+var TYPE_CODE_LABEL = { 'E':'常緑広葉樹', 'D':'落葉広葉樹', 'C':'針葉樹', 'L':'低木' };
+var TYPE_BADGE_COLOR = { 'E':'#2d6a4f', 'D':'#6b4226', 'C':'#1a3a2a', 'L':'#2c5f8a' };
+
+function addUserSpecies() {
+  var name  = document.getElementById('nm-species').value.trim();
+  var stype = document.getElementById('nm-stype').value;
+  var note  = document.getElementById('nm-note').value.trim();
+  if (!name)  { alert('樹種名を入力してください'); return; }
+  if (!stype) { alert('種別を選択してください'); return; }
+  // 既存チェック
+  if (userSpeciesCache[name] || SPECIES_MASTER[name]) {
+    if (!confirm('"' + name + '" はすでに登録済みです。上書きしますか？')) return;
+  }
+  dbAddUserSpecies({ name: name, typeCode: stype, note: note, date: new Date().toISOString() }, function() {
+    document.getElementById('nm-species').value = '';
+    document.getElementById('nm-stype').value   = '';
+    document.getElementById('nm-note').value    = '';
+    loadUserSpeciesCache(function() {
+      renderUserMasterList();
+      toast('✅ 「' + name + '」を追加しました');
+    });
+  });
+}
+
+function deleteUserSpecies(id, name) {
+  if (!confirm('"' + name + '" を削除しますか？')) return;
+  dbDeleteUserSpecies(id, function() {
+    loadUserSpeciesCache(function() {
+      renderUserMasterList();
+      toast('🗑️ 削除しました');
+    });
+  });
+}
+
+function renderUserMasterList() {
+  var listEl = document.getElementById('user-master-list');
+  if (!listEl) return;
+  dbGetAllUserSpecies(function(list) {
+    if (!list.length) {
+      listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--gray-3);font-size:0.85rem;">追加された樹種はありません</div>';
+      return;
+    }
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;">'
+      + '<thead><tr style="background:var(--green-dark);color:#fff;">'
+      + '<th style="padding:7px 10px;text-align:left;">樹種名</th>'
+      + '<th style="padding:7px 10px;text-align:left;">種別</th>'
+      + '<th style="padding:7px 10px;text-align:left;">備考</th>'
+      + '<th style="padding:7px 10px;text-align:left;">登録日</th>'
+      + '<th style="padding:7px 10px;width:50px;"></th>'
+      + '</tr></thead><tbody>';
+    list.forEach(function(item, i) {
+      var col = TYPE_BADGE_COLOR[item.typeCode] || '#555';
+      var lbl = TYPE_CODE_LABEL[item.typeCode]  || item.typeCode;
+      html += '<tr style="' + (i%2===0 ? 'background:var(--gray-1)' : '') + '">'
+        + '<td style="padding:7px 10px;font-weight:700;">' + escHtml(item.name) + '</td>'
+        + '<td style="padding:7px 10px;"><span style="background:' + col + ';color:#fff;font-size:0.72rem;padding:2px 8px;border-radius:10px;">' + escHtml(lbl) + '</span></td>'
+        + '<td style="padding:7px 10px;color:#666;">' + escHtml(item.note || '') + '</td>'
+        + '<td style="padding:7px 10px;color:var(--gray-3);font-size:0.75rem;">' + (item.date ? item.date.slice(0,10) : '') + '</td>'
+        + '<td style="padding:7px 10px;"><button class="btn-danger btn-sm" onclick="deleteUserSpecies(' + item.id + ',\'' + escJs(item.name) + '\')">削除</button></td>'
+        + '</tr>';
+    });
+    html += '</tbody></table>';
+    listEl.innerHTML = html;
+  });
+}
+
+function toggleBuiltinMaster(btn) {
+  var el = document.getElementById('builtin-master-list');
+  var open = el.style.display === 'none';
+  el.style.display = open ? 'block' : 'none';
+  btn.textContent = (open ? '▼' : '▶') + ' 組み込みマスタを表示（読み取り専用）';
+  if (!open || el.innerHTML) return;
+  // 初回のみ描画
+  var LABEL = { 'E':'常緑広葉樹', 'D':'落葉広葉樹', 'C':'針葉樹', 'L':'低木' };
+  var html = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;">'
+    + '<thead><tr style="background:#e0ddd8;"><th style="padding:5px 9px;text-align:left;">樹種名</th><th style="padding:5px 9px;text-align:left;">種別</th></tr></thead><tbody>';
+  var keys = Object.keys(SPECIES_MASTER).sort();
+  keys.forEach(function(k, i) {
+    var col = TYPE_BADGE_COLOR[SPECIES_MASTER[k]] || '#555';
+    var lbl = LABEL[SPECIES_MASTER[k]] || SPECIES_MASTER[k];
+    html += '<tr style="' + (i%2===0 ? 'background:var(--gray-1)' : '') + '">'
+      + '<td style="padding:4px 9px;">' + escHtml(k) + '</td>'
+      + '<td style="padding:4px 9px;"><span style="background:' + col + ';color:#fff;font-size:0.7rem;padding:1px 6px;border-radius:8px;">' + lbl + '</span></td>'
+      + '</tr>';
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+
 // =============================================
 //  IndexedDB 初期化
 // =============================================
-var DB_NAME = 'TreeLedger2', STORE = 'records', DB_VER = 1;
+var DB_NAME = 'TreeLedger2', STORE = 'records', DB_VER = 2;
 var db = null;
 
 function initDB(cb) {
   var req = indexedDB.open(DB_NAME, DB_VER);
   req.onupgradeneeded = function(e) {
     var d = e.target.result;
+    // records ストア（v1から）
     if (!d.objectStoreNames.contains(STORE))
       d.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+    // userSpecies ストア（v2で追加）
+    if (!d.objectStoreNames.contains('userSpecies'))
+      d.createObjectStore('userSpecies', { keyPath: 'id', autoIncrement: true });
   };
-  req.onsuccess = function(e) { db = e.target.result; cb(); };
-  req.onerror   = function()  { alert('IndexedDB初期化失敗'); };
+  req.onsuccess = function(e) {
+    db = e.target.result;
+    // ユーザーマスタをキャッシュしてから起動
+    loadUserSpeciesCache(cb);
+  };
+  req.onerror = function() { alert('IndexedDB初期化失敗'); };
 }
 function dbGetAll(cb) {
   db.transaction(STORE,'readonly').objectStore(STORE).getAll().onsuccess = function(e){ cb(e.target.result); };
@@ -802,6 +1003,7 @@ function saveEdit() {
     unit:        document.getElementById('e-unit-sel').value || '本',
     memo:        document.getElementById('e-memo').value.trim(),
     senteiBetsu: document.getElementById('e-sentei').value || '強剪定',
+    specType:    document.getElementById('e-spec-type').value || '', // 手動選択した種別
     photo:       currentPhotoData,
     date:        new Date().toISOString()
   };
@@ -1011,10 +1213,13 @@ function importJSON(event) {
 //  モード切替
 // =============================================
 function switchMode(mode) {
-  document.getElementById('panel-text').style.display = mode === 'text' ? 'block' : 'none';
-  document.getElementById('panel-form').style.display = mode === 'form' ? 'block' : 'none';
-  document.getElementById('tab-text').classList.toggle('active', mode === 'text');
-  document.getElementById('tab-form').classList.toggle('active', mode === 'form');
+  document.getElementById('panel-text').style.display   = mode === 'text'   ? 'block' : 'none';
+  document.getElementById('panel-form').style.display   = mode === 'form'   ? 'block' : 'none';
+  document.getElementById('panel-master').style.display = mode === 'master' ? 'block' : 'none';
+  document.getElementById('tab-text').classList.toggle('active',   mode === 'text');
+  document.getElementById('tab-form').classList.toggle('active',   mode === 'form');
+  document.getElementById('tab-master').classList.toggle('active', mode === 'master');
+  if (mode === 'master') renderUserMasterList();
 }
 
 // =============================================
@@ -1079,12 +1284,12 @@ var SPECIES_MASTER = {
 };
 
 // 幹周の実測値(cm) → ランク文字列に変換
-function girthToRank(val) {
+// 軽剪定用ランク変換（C<15あり / C=15-30あり）
+function girthToRankKei(val) {
   if (val === null || val === undefined || val === '') return '';
   val = parseFloat(val);
   if (isNaN(val)) return '';
   if (val <  15) return 'C<15';
-  if (val <  20) return 'C=15-30';  // 15-20は15-30ランクに含める
   if (val <  30) return 'C=15-30';
   if (val <  60) return 'C=30-60';
   if (val <  90) return 'C=60-90';
@@ -1095,37 +1300,92 @@ function girthToRank(val) {
   if (val < 240) return 'C=210-240';
   if (val < 270) return 'C=240-270';
   if (val < 300) return 'C=270-300';
-  return 'C=300以上';
+  return 'C=270-300'; // 300超はC=270-300に含める
 }
 
-// 幹周ランク文字列 ("c60-90" など) を正規化してv10-49形式に変換
-// 入力: "c60-90", "c90以上", "c15以下", "C=60-90" など
-// 出力: "C=60-90", "C<15", "C=90-120" など
-function normalizeGirthRank(str) {
+// 強剪定用ランク変換（C<30が最小 / C=15-30は存在しない）
+function girthToRankKyo(val) {
+  if (val === null || val === undefined || val === '') return '';
+  val = parseFloat(val);
+  if (isNaN(val)) return '';
+  if (val <  30) return 'C<30';      // 30未満はすべてC<30
+  if (val <  60) return 'C=30-60';
+  if (val <  90) return 'C=60-90';
+  if (val < 120) return 'C=90-120';
+  if (val < 150) return 'C=120-150';
+  if (val < 180) return 'C=150-180';
+  if (val < 210) return 'C=180-210';
+  if (val < 240) return 'C=210-240';
+  if (val < 270) return 'C=240-270';
+  if (val < 300) return 'C=270-300';
+  return 'C=270-300';
+}
+
+// 伐採用ランク変換（C<20が最小）
+function girthToRankBassai(val) {
+  if (val === null || val === undefined || val === '') return '';
+  val = parseFloat(val);
+  if (isNaN(val)) return '';
+  if (val <  20) return 'C<20';
+  if (val <  30) return 'C=20-30';
+  if (val <  60) return 'C=30-60';
+  if (val <  90) return 'C=60-90';
+  if (val < 120) return 'C=90-120';
+  if (val < 150) return 'C=120-150';
+  if (val < 180) return 'C=150-180';
+  if (val < 210) return 'C=180-210';
+  return 'C=180-210'; // 210超は最大ランク
+}
+
+// 後方互換: 既存コードが使うgirthToRank → 強剪定用を使用
+function girthToRank(val) { return girthToRankKyo(val); }
+
+// 幹周ランク文字列を正規化してv10-49形式に変換
+// sentei: '強剪定'(default) / '軽剪定' / '伐採' によってランク境界が変わる
+function normalizeGirthRankBySentei(str, sentei) {
   if (!str) return '';
   str = str.replace(/\s/g,'').replace(/ｃ/gi,'c').toUpperCase();
 
-  // すでに正規形 "C=XX-YY" or "C<XX" の場合はそのまま
-  if (/^C[=<]\d/.test(str)) return str;
+  // 変換関数を選択
+  var toRank = (sentei === '軽剪定') ? girthToRankKei
+             : (sentei === '伐採')   ? girthToRankBassai
+             :                         girthToRankKyo; // 強剪定(デフォルト)
 
-  // "C数字-数字" → "C=数字-数字"
+  // すでに "C=XX-YY" or "C<XX" の正規形 → そのままだとランク境界が合わない場合があるので数値変換
+  var m0 = str.match(/^C=?(\d+)-(\d+)$/);
+  if (m0) {
+    // 範囲の中間値で代表させてランクに変換
+    var mid = (parseFloat(m0[1]) + parseFloat(m0[2])) / 2;
+    return toRank(mid);
+  }
+  var m0b = str.match(/^C<(\d+)$/);
+  if (m0b) return toRank(parseFloat(m0b[1]) - 1);
+
+  // "C数字-数字"
   var m1 = str.match(/^C(\d+)-(\d+)$/);
-  if (m1) return 'C=' + m1[1] + '-' + m1[2];
+  if (m1) return toRank((parseFloat(m1[1]) + parseFloat(m1[2])) / 2);
 
-  // "C数字以下" or "C<数字" → 実測値として girthToRank
-  var m2 = str.match(/^C(\d+)以下$/i) || str.match(/^C<(\d+)$/);
-  if (m2) return girthToRank(parseFloat(m2[1]) - 0.1);
+  // "C数字以下"
+  var m2 = str.match(/^C(\d+)以下$/i);
+  if (m2) return toRank(parseFloat(m2[1]) - 0.1);
 
-  // "C数字以上" → girthToRank
+  // "C数字以上"
   var m3 = str.match(/^C(\d+)以上$/i);
-  if (m3) return girthToRank(parseFloat(m3[1]));
+  if (m3) return toRank(parseFloat(m3[1]));
 
-  // "C数字" のみ → 実測値として変換
+  // "C数字" のみ → 実測値
   var m4 = str.match(/^C(\d+\.?\d*)$/);
-  if (m4) return girthToRank(parseFloat(m4[1]));
+  if (m4) return toRank(parseFloat(m4[1]));
 
-  return str; // 解釈できない場合はそのまま返す
+  // 数字のみ（cなし）
+  var m5 = str.match(/^(\d+\.?\d*)$/);
+  if (m5) return toRank(parseFloat(m5[1]));
+
+  return str;
 }
+
+// 後方互換: 強剪定用として既存コードから呼ばれる
+function normalizeGirthRank(str) { return normalizeGirthRankBySentei(str, '強剪定'); }
 
 // 樹種から種別コードを取得（部分一致も試みる）
 function getSpeciesType(species) {
@@ -1148,19 +1408,26 @@ function getSpeciesType(species) {
 //  呼び出し: commitPreview / saveForm / saveEdit
 // =============================================
 function normalizeRecord(r) {
-  // 幹周ランクを正規化 (c80 → C=60-90 など)
-  var girthRank = normalizeGirthRank(r.girth || '');
+  // 剪定種別を先に確定
+  var sb = r.senteiBetsu || '強剪定';
+  if ((r.memo || '').indexOf('伐採') >= 0) sb = '伐採';
+  // 幹周ランクを剪定種別に応じて正規化 (c80+強剪定 → C=60-90 など)
+  var girthRank = normalizeGirthRankBySentei(r.girth || '', sb);
 
-  // 樹種から種別コードを取得
-  var stypeCode = getSpeciesType(r.species || '');
-
-  // 種別ラベル（DB保存用）
+  // 種別ラベル: 引数に specType が明示されていればそれを優先
+  // （編集モーダルで手動選択した値 → 自動判定で上書きしない）
   var specTypeLabel = '';
-  if      (stypeCode === 'E') specTypeLabel = '常緑広葉樹';
-  else if (stypeCode === 'D') specTypeLabel = '落葉広葉樹';
-  else if (stypeCode === 'C') specTypeLabel = '針葉樹';
-  else if (stypeCode === 'L') specTypeLabel = '低木';
-  // 不明な樹種は空のまま（カード上で手動選択可）
+  if (r.specType) {
+    // 手動選択済みの値をそのまま使う
+    specTypeLabel = r.specType;
+  } else {
+    // 自動判定（SPECIES_MASTERとユーザーマスタを検索）
+    var stypeCode = getSpeciesType(r.species || '');
+    if      (stypeCode === 'E') specTypeLabel = '常緑広葉樹';
+    else if (stypeCode === 'D') specTypeLabel = '落葉広葉樹';
+    else if (stypeCode === 'C') specTypeLabel = '針葉樹';
+    else if (stypeCode === 'L') specTypeLabel = '低木';
+  }
 
   // 剪定種別: 既存の senteiBetsu があればそれを引き継ぐ、なければデフォルト強剪定
   // ただしメモに「伐採」があれば伐採に
@@ -1228,8 +1495,10 @@ function buildSummary(park) {
 
   // 低木（m2で管理されているもの）を別集計
   // メモに "m2" が含まれる行はm2集計へ
-  var teiboM2 = sentei.filter(function(r) { return /\d+\.?\d*\s*m2/i.test(r.memo || ''); });
-  var honsu   = sentei.filter(function(r) { return !/\d+\.?\d*\s*m2/i.test(r.memo || ''); });
+  // m2品目の判定: unit==='m2' または memoに面積あり
+  var isM2Row = function(r) { return r.unit === 'm2' || /\d+\.?\d*\s*m2/i.test(r.memo || ''); };
+  var teiboM2 = sentei.filter(isM2Row);
+  var honsu   = sentei.filter(function(r) { return !isM2Row(r); });
 
   // === 本数集計（種別×ランク） ===
   // key: "種別コード|ランク" → {kou, type, rank, qty, unknown:[]}
@@ -1237,34 +1506,45 @@ function buildSummary(park) {
   var unknownSpecies = []; // 種別判定できなかった樹種
 
   honsu.forEach(function(r) {
-    var stype = getSpeciesType(r.species);
-    var rank  = normalizeGirthRank(r.girth);
-    var qty   = parseInt(r.qty) || 1;
-    // senteiBetsu フィールドで剪定種別を判定（旧データはメモのテキストで補完）
+    var stype = r.specType ? null : getSpeciesType(r.species); // 保存済みspecTypeがあれば使う
+    // specTypeラベルからコードに逆引き
+    if (!stype && r.specType) {
+      if      (r.specType === '常緑広葉樹') stype = 'E';
+      else if (r.specType === '落葉広葉樹') stype = 'D';
+      else if (r.specType === '針葉樹')     stype = 'C';
+      else if (r.specType === '低木')       stype = 'L';
+    }
+    if (!stype) stype = getSpeciesType(r.species);
+
+    // senteiBetsu（旧データはmemoから補完）
     var sb = r.senteiBetsu || (/軽剪定/.test(r.memo || '') ? '軽剪定' : '強剪定');
     var isKei = (sb === '軽剪定');
-    // 伐採フラグ（senteiBetsuが伐採のものはhonsuではなくbassaiで集計）
-    if (sb === '伐採') {
-      var rank2 = normalizeGirthRank(r.girth);
-      var key3 = rank2 || '規格不明';
-      if (!bassaiBuckets) return; // 後続処理でbassaiBucketsが未定義の場合スキップ
-      return; // この行は後のbassai集計に任せる（メモ判定と重複しないよう抜ける）
-    }
+
+    // senteiBetsuに応じたランク変換（規格の境界がKei/Kyo/伐採で異なる）
+    var rank = normalizeGirthRankBySentei(r.girthRank || r.girth, sb);
+    var qty  = parseInt(r.qty) || 1;
 
     if (!stype) {
-      unknownSpecies.push({ species: r.species, girth: r.girth, qty: qty });
+      unknownSpecies.push({ species: r.species, girth: r.girthRank || r.girth, qty: qty });
       return;
     }
     if (stype === 'L') {
-      var key2 = 'L|' + rank;
-      if (!buckets[key2]) buckets[key2] = { typeCode:'L', kou:'低木剪定', type:'低木(機)寄植え', rank: rank, qty: 0, speciesList: [] };
+      // 低木の本数集計: senteiBetsuで工種・種類を切替
+      var lKou, lType;
+      if (isKei) {
+        lKou = '低木剪定';       lType = '低木(機)寄植え';
+      } else {
+        lKou = '低木剪定(強剪定)'; lType = '低木(機)寄植え(強剪定)';
+      }
+      var key2 = lKou + '|L|' + rank;
+      if (!buckets[key2]) buckets[key2] = { typeCode:'L', kou: lKou, type: lType, rank: rank, qty: 0, speciesList: [] };
       buckets[key2].qty += qty;
       buckets[key2].speciesList.push(r.species + '×' + qty);
       return;
     }
     var kt = TYPE_TO_KOU[stype];
     if (!kt) return;
-    // 軽剪定指示があれば種類名を差し替え
+    // 軽剪定の場合は種類名の「強剪定」を「軽剪定」に置換
     var typeName = isKei ? kt.type.replace('強剪定', '軽剪定') : kt.type;
     var key = stype + '|' + rank + '|' + (isKei ? 'kei' : 'kyo');
     if (!buckets[key]) buckets[key] = { typeCode: stype, kou: kt.kou, type: typeName, rank: rank, qty: 0, speciesList: [] };
@@ -1275,19 +1555,40 @@ function buildSummary(park) {
   // === m2集計 ===
   var m2buckets = {}; // key: "高さランク"
   teiboM2.forEach(function(r) {
-    var m = (r.memo || '').match(/([\d.]+)\s*m2/i);
-    var area = m ? parseFloat(m[1]) : 0;
+    // m2の取得: qtyがm2単位の場合はqtyを使い、なければmemoから抽出
+    var area = 0;
+    if (r.unit === 'm2') {
+      area = parseFloat(r.qty) || 0;
+    } else {
+      var mm = (r.memo || '').match(/([\d.]+)\s*m2/i);
+      area = mm ? parseFloat(mm[1]) : 0;
+    }
     if (!area) return;
+
+    // senteiBetsuで工種・種類を決定
+    var sb = r.senteiBetsu || '強剪定';
+    var mKou, mType;
+    if (sb === '軽剪定') {
+      mKou  = '低木剪定';
+      mType = '低木(機)寄植え';
+    } else {
+      // 強剪定（デフォルト）
+      mKou  = '低木剪定(強剪定)';
+      mType = '低木(機)寄植え(強剪定)';
+    }
+
     var hRank = getHeightRank(r);
-    if (!m2buckets[hRank]) m2buckets[hRank] = { hRank: hRank, area: 0, speciesList: [] };
-    m2buckets[hRank].area += area;
-    m2buckets[hRank].speciesList.push(r.species + '(' + area + 'm2)');
+    // key: 工種+樹高ランクで分類
+    var mKey = mKou + '|' + hRank;
+    if (!m2buckets[mKey]) m2buckets[mKey] = { hRank: hRank, kou: mKou, type: mType, area: 0, speciesList: [] };
+    m2buckets[mKey].area += area;
+    m2buckets[mKey].speciesList.push(r.species + '(' + area + 'm2)');
   });
 
-  // === 伐採集計 ===
+  // === 伐採集計（伐採用ランク: C<20が最小） ===
   var bassaiBuckets = {};
   bassai.forEach(function(r) {
-    var rank = normalizeGirthRank(r.girth);
+    var rank = normalizeGirthRankBySentei(r.girthRank || r.girth, '伐採');
     var qty  = parseInt(r.qty) || 1;
     var key  = rank || '規格不明';
     if (!bassaiBuckets[key]) bassaiBuckets[key] = { rank: key, qty: 0, speciesList: [] };
@@ -1323,7 +1624,7 @@ function getHeightRank(r) {
     var hcm = parseInt(hm[1]);
     var isOver = hm[2] === '以上';
     if (hcm >= 250 && isOver) return 'H=2.5m以上';
-    if (hcm >= 150 && isOver) return 'H=1.5m-2.5m';  // 150以上はH=1.5m-2.5mに
+    if (hcm >= 150 && isOver) return 'H=1.5-2.5m';   // 150以上はH=1.5-2.5mに
     if (hcm >= 150 && !isOver) return 'H=1.5m未満';  // 150以下はH=1.5m未満に
     if (hcm > 250) return 'H=2.5m以上';
   }
@@ -1333,7 +1634,7 @@ function getHeightRank(r) {
     var hcm2 = parseInt(hm2[1]);
     var isOver2 = hm2[2] === '以上';
     if (hcm2 >= 250 && isOver2) return 'H=2.5m以上';
-    if (hcm2 >= 150 && isOver2) return 'H=1.5m-2.5m';
+    if (hcm2 >= 150 && isOver2) return 'H=1.5-2.5m';
     if (hcm2 >= 150 && !isOver2) return 'H=1.5m未満';
   }
   // デフォルト
@@ -1367,8 +1668,8 @@ function renderSummaryTable(buckets, m2buckets, bassaiBuckets, unknownSpecies) {
   Object.keys(m2buckets).forEach(function(k) {
     var b = m2buckets[k];
     html += '<tr style="' + bg() + '">'
-      + '<td style="padding:6px 10px;">低木剪定</td>'
-      + '<td style="padding:6px 10px;">低木(機)寄植え ' + escHtml(b.hRank) + '</td>'
+      + '<td style="padding:6px 10px;">' + escHtml(b.kou) + '</td>'
+      + '<td style="padding:6px 10px;">' + escHtml(b.type) + ' ' + escHtml(b.hRank) + '</td>'
       + '<td style="padding:6px 10px;text-align:right;font-weight:700;">' + b.area.toFixed(2) + '</td>'
       + '<td style="padding:6px 10px;">m2</td>'
       + '</tr>';
@@ -1410,7 +1711,7 @@ function buildTransferText(buckets, m2buckets, bassaiBuckets) {
   Object.keys(m2buckets).forEach(function(k) {
     var b = m2buckets[k];
     var memo = (b.speciesList || []).join('、');
-    lines.push('低木剪定\t低木(機)寄植え ' + b.hRank + '\tm2\t' + b.area.toFixed(2) + '\t' + memo);
+    lines.push(b.kou + '\t' + b.type + ' ' + b.hRank + '\tm2\t' + b.area.toFixed(2) + '\t' + memo);
   });
   Object.keys(bassaiBuckets).forEach(function(k) {
     var b = bassaiBuckets[k];
