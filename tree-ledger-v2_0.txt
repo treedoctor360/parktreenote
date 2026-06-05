@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>樹木台帳メモ v2.0</title>
+<style>
+/* ===== CSS変数 ===== */
+:root {
+  --green-dark:  #1a3a2a;
+  --green-mid:   #2d6a4f;
+  --green-light: #52b788;
+  --green-pale:  #d8f3dc;
+  --brown:       #6b4226;
+  --cream:       #f8f4ee;
+  --gray-1:      #f4f4f2;
+  --gray-2:      #e0ddd8;
+  --gray-3:      #9a9590;
+  --text:        #1e1e1e;
+  --shadow:      0 2px 12px rgba(0,0,0,0.10);
+  --radius:      10px;
+  --accent:      #e07b39;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif; background: var(--cream); color: var(--text); min-height: 100vh; }
+
+/* ===== ヘッダー ===== */
+header {
+  background: var(--green-dark); color: #fff;
+  padding: 12px 16px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+header h1 { font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.header-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ===== ボタン ===== */
+button { cursor: pointer; border: none; border-radius: 6px; font-family: inherit; font-size: 0.8rem; padding: 6px 11px; font-weight: 700; transition: opacity .15s, transform .1s; white-space: nowrap; }
+button:active { transform: scale(.97); }
+button:hover  { opacity: .85; }
+.btn-primary   { background: var(--green-light); color: #fff; }
+.btn-secondary { background: var(--gray-2); color: var(--text); }
+.btn-danger    { background: #d64040; color: #fff; }
+.btn-export    { background: #2c5f8a; color: #fff; }
+.btn-accent    { background: var(--accent); color: #fff; }
+.btn-parse     { background: var(--green-mid); color: #fff; font-size: 0.95rem; padding: 10px 20px; width: 100%; margin-top: 8px; }
+.btn-sm        { font-size: 0.75rem; padding: 4px 8px; }
+
+/* ===== メイン ===== */
+main { max-width: 1000px; margin: 0 auto; padding: 16px 14px 80px; }
+
+/* ===== タブ切替（入力モード） ===== */
+.input-mode-tabs {
+  display: flex; gap: 0; margin-bottom: 16px;
+  border: 2px solid var(--green-mid); border-radius: 8px; overflow: hidden;
+}
+.mode-tab {
+  flex: 1; padding: 10px; text-align: center; cursor: pointer;
+  font-size: 0.85rem; font-weight: 700; background: #fff; color: var(--green-mid);
+  transition: background .15s, color .15s;
+}
+.mode-tab.active { background: var(--green-mid); color: #fff; }
+
+/* ===== テキスト入力パネル ===== */
+#panel-text { display: block; }
+#panel-form { display: none; }
+
+.parse-area {
+  background: #fff; border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 16px; margin-bottom: 16px;
+}
+.parse-area h3 { font-size: 0.88rem; color: var(--green-dark); margin-bottom: 8px; }
+.parse-area textarea {
+  width: 100%; min-height: 200px; padding: 10px;
+  border: 1.5px solid var(--gray-2); border-radius: 6px;
+  font-family: 'Hiragino Kaku Gothic ProN',monospace; font-size: 0.88rem;
+  line-height: 1.7; resize: vertical; background: var(--gray-1);
+}
+.parse-area textarea:focus { outline: none; border-color: var(--green-light); background: #fff; }
+
+/* 解析プレビューテーブル */
+#preview-section { display: none; margin-bottom: 16px; }
+#preview-section h3 { font-size: 0.88rem; color: var(--green-dark); margin-bottom: 8px; font-weight: 700; }
+.preview-table-wrap { overflow-x: auto; border-radius: 8px; box-shadow: var(--shadow); }
+table.preview-tbl {
+  width: 100%; border-collapse: collapse; background: #fff; font-size: 0.82rem;
+}
+.preview-tbl th {
+  background: var(--green-dark); color: #fff; padding: 8px 10px;
+  text-align: left; white-space: nowrap; font-weight: 700;
+}
+.preview-tbl td { padding: 7px 10px; border-bottom: 1px solid var(--gray-2); vertical-align: top; }
+.preview-tbl tr:last-child td { border-bottom: none; }
+.preview-tbl tr:nth-child(even) td { background: var(--gray-1); }
+.preview-tbl td input {
+  width: 100%; border: 1px solid var(--gray-2); border-radius: 4px;
+  padding: 3px 6px; font-size: 0.82rem; font-family: inherit;
+  background: #fff;
+}
+.preview-tbl td input:focus { outline: none; border-color: var(--green-light); }
+.park-header td {
+  background: var(--green-pale) !important; font-weight: 700;
+  color: var(--green-dark); font-size: 0.8rem; padding: 5px 10px;
+}
+.del-row-btn { background: none; color: #d64040; font-size: 1rem; padding: 2px 6px; border-radius: 4px; }
+.del-row-btn:hover { background: #ffeaea; }
+
+.preview-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+/* ===== フォーム入力パネル ===== */
+.form-panel { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; margin-bottom: 16px; }
+.form-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.form-group { flex: 1; min-width: 120px; }
+.form-group label { display: block; font-size: 0.78rem; font-weight: 700; margin-bottom: 4px; color: var(--green-dark); }
+.form-group .req { color: #d64040; }
+.form-group input, .form-group textarea, .form-group select {
+  width: 100%; padding: 8px 9px;
+  border: 1.5px solid var(--gray-2); border-radius: 6px;
+  font-family: inherit; font-size: 0.88rem; background: var(--gray-1);
+}
+.form-group input:focus, .form-group textarea:focus { outline: none; border-color: var(--green-light); background: #fff; }
+.form-group textarea { min-height: 60px; resize: vertical; }
+
+/* ===== 公園フィルタータブ ===== */
+#park-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+.tab {
+  padding: 5px 13px; border-radius: 20px; background: var(--gray-2);
+  color: var(--text); cursor: pointer; font-size: 0.82rem; font-weight: 700;
+  border: 2px solid transparent; transition: all .15s;
+}
+.tab.active { background: var(--green-mid); color: #fff; border-color: var(--green-dark); }
+.tab:hover:not(.active) { background: var(--green-pale); }
+
+/* ===== 統計バー ===== */
+#stats-bar {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  padding: 10px 14px; background: var(--green-pale);
+  border-radius: 8px; margin-bottom: 14px;
+  font-size: 0.82rem; color: var(--green-dark); font-weight: 700;
+}
+
+/* ===== カードグリッド ===== */
+#card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.tree-card {
+  background: #fff; border-radius: var(--radius); box-shadow: var(--shadow);
+  border-left: 5px solid var(--green-mid); overflow: hidden;
+  transition: transform .15s, box-shadow .15s;
+}
+.tree-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.13); }
+.card-photo-thumb { width: 100%; height: 140px; object-fit: cover; display: block; background: var(--gray-1); }
+.card-photo-empty { width: 100%; height: 80px; background: var(--gray-1); display: flex; align-items: center; justify-content: center; color: var(--gray-3); font-size: 1.6rem; cursor: pointer; }
+.card-photo-empty:hover { background: var(--green-pale); }
+.card-body { padding: 12px 14px 10px; }
+.card-park { font-size: 0.72rem; color: var(--green-mid); font-weight: 700; margin-bottom: 2px; }
+.card-species { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+.card-meta { display: flex; gap: 8px; flex-wrap: wrap; font-size: 0.78rem; color: #555; margin-bottom: 8px; }
+.card-meta span { background: var(--gray-1); padding: 2px 7px; border-radius: 10px; }
+.card-memo { font-size: 0.78rem; color: #666; background: var(--gray-1); border-radius: 4px; padding: 5px 7px; margin-bottom: 8px; white-space: pre-wrap; word-break: break-all; max-height: 48px; overflow: hidden; }
+.card-actions { display: flex; gap: 5px; }
+
+/* 写真追加ボタン（カード上の小さいもの） */
+.add-photo-btn { background: var(--green-pale); color: var(--green-mid); border: 1px dashed var(--green-mid); font-size: 0.72rem; padding: 3px 8px; }
+
+/* ===== 空表示 ===== */
+#empty-msg { text-align: center; padding: 50px 20px; color: var(--gray-3); font-size: 0.9rem; display: none; }
+#empty-msg .icon { font-size: 2.5rem; display: block; margin-bottom: 8px; }
+
+/* ===== モーダル ===== */
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 200; align-items: center; justify-content: center; padding: 12px; }
+.modal-overlay.active { display: flex; }
+.modal { background: #fff; border-radius: var(--radius); padding: 20px; width: 100%; max-width: 500px; max-height: 92vh; overflow-y: auto; box-shadow: 0 8px 40px rgba(0,0,0,.22); animation: slideUp .2s ease; }
+@keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.modal h2 { font-size: 1.05rem; margin-bottom: 16px; color: var(--green-dark); padding-bottom: 8px; border-bottom: 2px solid var(--green-pale); }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--gray-2); }
+
+/* 写真プレビュー（編集モーダル内） */
+#photo-preview-wrap { border: 2px dashed var(--gray-2); border-radius: 8px; padding: 12px; text-align: center; cursor: pointer; background: var(--gray-1); position: relative; transition: border-color .15s; }
+#photo-preview-wrap:hover { border-color: var(--green-light); }
+#photo-preview-wrap input[type=file] { display: none; }
+#photo-preview { max-width: 100%; max-height: 180px; border-radius: 6px; display: none; }
+#photo-placeholder { color: var(--gray-3); font-size: 0.82rem; }
+#photo-clear-btn { display: none; position: absolute; top: 5px; right: 5px; background: rgba(0,0,0,.45); color: #fff; border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 0.75rem; cursor: pointer; line-height: 22px; padding: 0; }
+
+/* ===== トースト ===== */
+#toast { position: fixed; bottom: 20px; right: 16px; background: var(--green-dark); color: #fff; padding: 9px 16px; border-radius: 8px; font-size: 0.83rem; z-index: 999; opacity: 0; transform: translateY(8px); transition: opacity .25s, transform .25s; pointer-events: none; }
+#toast.show { opacity: 1; transform: translateY(0); }
+
+/* ===== 印刷 ===== */
+@media print {
+  header, .input-mode-tabs, .parse-area, #park-tabs, .card-actions,
+  #stats-bar, #preview-section, #empty-msg button { display: none !important; }
+  body { background: #fff; }
+  .tree-card { break-inside: avoid; }
+  #card-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+}
+
+@media (max-width: 600px) {
+  #card-grid { grid-template-columns: 1fr; }
+  .preview-tbl { font-size: 0.75rem; }
+  .preview-tbl th, .preview-tbl td { padding: 5px 7px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== ヘッダー ===== -->
+<header>
+  <h1>🌳 樹木台帳メモ</h1>
+  <div class="header-btns">
+    <button class="btn-export" onclick="exportCSV()">CSV</button>
+    <button class="btn-export" onclick="exportJSON()">JSON</button>
+    <button class="btn-secondary" onclick="window.print()">印刷</button>
+    <label>
+      <button class="btn-secondary" onclick="document.getElementById('import-file').click()">復元</button>
+      <input type="file" id="import-file" accept=".json" style="display:none" onchange="importJSON(event)">
+    </label>
+  </div>
+</header>
+
+<main>
+
+  <!-- ===== 入力モード切替タブ ===== -->
+  <div class="input-mode-tabs">
+    <div class="mode-tab active" id="tab-text" onclick="switchMode('text')">📋 テキスト一括入力</div>
+    <div class="mode-tab"        id="tab-form" onclick="switchMode('form')">✏️ フォーム入力</div>
+  </div>
+
+  <!-- ===== テキスト一括入力パネル ===== -->
+  <div id="panel-text">
+    <div class="parse-area">
+      <h3>📌 メモ帳のテキストをそのまま貼り付けてください</h3>
+      <textarea id="raw-text" placeholder="# 公園名&#10;樹種　幹周　数量　メモ&#10;&#10;例:&#10;# 花園第6&#10;ポプラ　c90  1本&#10;クスノキ　c80 1本&#10;ヒラド　h150以上d110 5本=8.25m2"></textarea>
+      <button class="btn-parse" onclick="parseText()">🔍 解析してプレビュー</button>
+    </div>
+
+    <!-- 解析プレビュー -->
+    <div id="preview-section">
+      <h3 id="preview-count"></h3>
+      <div class="preview-table-wrap">
+        <table class="preview-tbl" id="preview-table">
+          <thead>
+            <tr>
+              <th style="width:22%">公園名</th>
+              <th style="width:18%">樹種</th>
+              <th style="width:14%">幹周ランク</th>
+              <th style="width:7%">数量</th>
+              <th style="width:30%">メモ（面積・備考）</th>
+              <th style="width:5%"></th>
+            </tr>
+          </thead>
+          <tbody id="preview-tbody"></tbody>
+        </table>
+      </div>
+      <div class="preview-actions">
+        <button class="btn-primary" onclick="commitPreview()">✅ この内容で登録する</button>
+        <button class="btn-accent"  onclick="addPreviewRow()">＋ 行を追加</button>
+        <button class="btn-secondary" onclick="clearPreview()">✕ キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== フォーム入力パネル ===== -->
+  <div id="panel-form">
+    <div class="form-panel">
+      <div class="form-row">
+        <div class="form-group" style="min-width:180px;flex:2">
+          <label>公園名 <span class="req">*</span></label>
+          <input type="text" id="f-park" placeholder="例: 花園第6" list="park-list">
+          <datalist id="park-list"></datalist>
+        </div>
+        <div class="form-group" style="flex:2">
+          <label>樹種 <span class="req">*</span></label>
+          <input type="text" id="f-species" placeholder="例: クスノキ" list="species-list">
+          <datalist id="species-list"></datalist>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>幹周ランク</label>
+          <input type="text" id="f-girth" placeholder="例: c60-90">
+        </div>
+        <div class="form-group">
+          <label>数量 (本)</label>
+          <input type="number" id="f-qty" placeholder="1" min="1" value="1">
+        </div>
+        <div class="form-group" style="flex:2">
+          <label>メモ（面積・備考）</label>
+          <input type="text" id="f-memo" placeholder="例: 8.25m2、株立">
+        </div>
+      </div>
+      <button class="btn-primary" style="width:100%;padding:10px" onclick="saveForm()">＋ 追加</button>
+    </div>
+  </div>
+
+  <!-- ===== 統計バー ===== -->
+  <div id="stats-bar">
+    <span>📍 公園 <strong id="stat-parks">0</strong></span>
+    <span>🌲 本数合計 <strong id="stat-trees">0</strong></span>
+    <span>📝 レコード <strong id="stat-records">0</strong></span>
+  </div>
+
+  <!-- ===== 公園タブ ===== -->
+  <div id="park-tabs"><div class="tab active" data-park="all" onclick="filterByPark('all',this)">すべて</div></div>
+
+  <!-- ===== カードグリッド ===== -->
+  <div id="card-grid"></div>
+  <div id="empty-msg"><span class="icon">🌱</span>登録がありません</div>
+
+</main>
+
+<!-- ===== 編集モーダル ===== -->
+<div class="modal-overlay" id="modal-edit">
+  <div class="modal">
+    <h2>✏️ 編集</h2>
+    <input type="hidden" id="edit-id">
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <label>公園名 <span class="req">*</span></label>
+        <input type="text" id="e-park" list="park-list2">
+        <datalist id="park-list2"></datalist>
+      </div>
+      <div class="form-group" style="flex:2">
+        <label>樹種 <span class="req">*</span></label>
+        <input type="text" id="e-species" list="species-list2">
+        <datalist id="species-list2"></datalist>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>幹周ランク</label>
+        <input type="text" id="e-girth">
+      </div>
+      <div class="form-group">
+        <label>数量</label>
+        <input type="number" id="e-qty" min="1">
+      </div>
+      <div class="form-group" style="flex:2">
+        <label>メモ</label>
+        <input type="text" id="e-memo">
+      </div>
+    </div>
+
+    <!-- 写真（後から追加できる） -->
+    <div class="form-group" style="margin-bottom:12px">
+      <label>写真 <small style="font-weight:normal;color:#888">（後から追加可）</small></label>
+      <div id="photo-preview-wrap" onclick="document.getElementById('e-photo').click()">
+        <input type="file" id="e-photo" accept="image/*" onchange="handlePhoto(event)">
+        <img id="photo-preview" alt="写真プレビュー">
+        <div id="photo-placeholder"><span style="font-size:1.5rem">📷</span><br>タップして写真を追加（自動圧縮）</div>
+        <button id="photo-clear-btn" onclick="clearPhoto(event)">×</button>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-danger btn-sm"   onclick="deleteFromModal()">削除</button>
+      <button class="btn-secondary"       onclick="closeModal('modal-edit')">キャンセル</button>
+      <button class="btn-primary"         onclick="saveEdit()">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== トースト ===== -->
+<div id="toast"></div>
+
+<script>
+// =============================================
+//  IndexedDB 初期化
+// =============================================
+var DB_NAME = 'TreeLedger2', STORE = 'records', DB_VER = 1;
+var db = null;
+
+function initDB(cb) {
+  var req = indexedDB.open(DB_NAME, DB_VER);
+  req.onupgradeneeded = function(e) {
+    var d = e.target.result;
+    if (!d.objectStoreNames.contains(STORE))
+      d.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+  };
+  req.onsuccess = function(e) { db = e.target.result; cb(); };
+  req.onerror   = function()  { alert('IndexedDB初期化失敗'); };
+}
+function dbGetAll(cb) {
+  db.transaction(STORE,'readonly').objectStore(STORE).getAll().onsuccess = function(e){ cb(e.target.result); };
+}
+function dbAdd(rec, cb) {
+  var req = db.transaction(STORE,'readwrite').objectStore(STORE).add(rec);
+  req.onsuccess = function(){ cb && cb(req.result); };
+}
+function dbPut(rec, cb) {
+  db.transaction(STORE,'readwrite').objectStore(STORE).put(rec).onsuccess = function(){ cb && cb(); };
+}
+function dbDelete(id, cb) {
+  db.transaction(STORE,'readwrite').objectStore(STORE).delete(id).onsuccess = function(){ cb && cb(); };
+}
+
+// =============================================
+//  テキスト解析
+//  書式: # 公園名 → セクション開始
+//        樹種　[幹周ランク]　[数量]　[メモ]
+// =============================================
+var parsedRows = []; // 解析結果を一時保持
+
+function parseText() {
+  var raw = document.getElementById('raw-text').value.trim();
+  if (!raw) { alert('テキストを入力してください'); return; }
+
+  var lines = raw.split(/\r?\n/);
+  var rows = [];
+  var currentPark = '';
+
+  lines.forEach(function(line) {
+    line = line.trim();
+    if (!line) return;
+
+    // 公園名行: # で始まる
+    if (/^#/.test(line)) {
+      currentPark = line.replace(/^#+\s*/, '').trim();
+      return;
+    }
+    // 「入り口から」などナビゲーション注釈行はスキップ
+    if (/^入り口|^奥から|^右側|^左側|^北|^南|^東|^西/.test(line)) return;
+
+    // --- 樹種・幹周ランク・数量・メモを抽出 ---
+    var parsed = parseLine(line, currentPark);
+    if (parsed) rows.push(parsed);
+  });
+
+  if (!rows.length) { alert('解析できる行がありませんでした'); return; }
+
+  parsedRows = rows;
+  renderPreview(rows);
+}
+
+function parseLine(line, park) {
+  // 数量パターン: "N本" または "N本=Xm2"
+  var qtyMatch  = line.match(/(\d+)\s*本/);
+  var qty       = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+
+  // 面積パターン: "= X m2" または "Xm2" または "X✖️Y" など
+  var areaMatch = line.match(/[=＝]?\s*([\d.]+)\s*m2/i)
+               || line.match(/([\d.]+)\s*[mｍ]2/i);
+  var area = areaMatch ? areaMatch[1] + 'm2' : '';
+
+  // 幹周ランクパターン: c数字-数字 or c数字以上/以下 or h数字以上 など
+  var girthMatch = line.match(/[cCｃＣ]\s*[\d.]+\s*[-‐–]\s*[\d.]+/i)   // c60-90
+                || line.match(/[cCｃＣ]\s*[\d.]+\s*(以上|以下|[+＋])/i) // c90以上
+                || line.match(/[cCｃＣ]\s*[\d.]+/i)                      // c90
+                || line.match(/[hHｈＨ]\s*[\d.]+\s*(以上|以下)/i);       // h150以上
+
+  // 幹周ランクを正規化（c60-90 などを抜き出す）
+  var girth = '';
+  if (girthMatch) {
+    girth = girthMatch[0].replace(/\s/g,'').replace(/ｃ/g,'c').replace(/ＣＣ/g,'c');
+  }
+
+  // 樹種: 行頭から最初のスペース・タブ・数字区切りまで
+  // ただし幹周ランク・数量・計算式の前まで
+  var speciesRaw = line
+    .replace(/\s*[cCｃＣhHｈＨ][\d.\s\-–以上以下+＋×✖️xX*]+/gi, ' ')
+    .replace(/\s*\d+\s*本[^\s]*/gi, ' ')
+    .replace(/\s*[=＝]\s*[\d.]+\s*m2/gi, ' ')
+    .replace(/\s*[\d.]+\s*m2/gi, ' ')
+    .replace(/\s*w[\d.]+/gi, ' ')
+    .replace(/\s*d[\d.]+/gi, ' ')
+    .replace(/\s*[\d]{2,}\s*[✖️×xX\*]\s*[\d.]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // 先頭の単語（スペース区切り最初の要素）を樹種とする
+  var species = speciesRaw.split(/[\s　]+/)[0].trim();
+  if (!species) return null;
+
+  // メモ: 面積、w/d寸法、その他残りの情報をまとめる
+  var memoParts = [];
+  var wMatch = line.match(/w\s*[\d.]+/gi);
+  var dMatch = line.match(/d\s*[\d.]+/gi);
+  if (wMatch) memoParts.push(wMatch.join(' '));
+  if (dMatch) memoParts.push(dMatch.join(' '));
+  if (area)   memoParts.push(area);
+
+  // 株立などの表記
+  if (/株立/.test(line))    memoParts.push('株立');
+  if (/伐採/.test(line))    memoParts.push('伐採');
+  if (/勝手生え/.test(line)) memoParts.push('勝手生え');
+  if (/以上/.test(line) && !/[cCｃＣhHｈＨ]\d/.test(line.split('以上')[0].slice(-3))) {
+    // 高さ表記(h150以上など)は girth に入るので重複排除
+  }
+
+  return {
+    park:    park,
+    species: species,
+    girth:   girth,
+    qty:     qty,
+    memo:    memoParts.join(' / ')
+  };
+}
+
+// プレビューテーブルを描画
+function renderPreview(rows) {
+  var tbody = document.getElementById('preview-tbody');
+  var html = '';
+  var lastPark = '';
+
+  rows.forEach(function(r, i) {
+    // 公園名が変わったら仕切り行を挿入
+    if (r.park !== lastPark) {
+      html += '<tr class="park-header"><td colspan="6">📍 ' + escHtml(r.park) + '</td></tr>';
+      lastPark = r.park;
+    }
+    html += '<tr id="pr-' + i + '">'
+      + '<td><input value="' + escAttr(r.park)    + '" onchange="updatePRow(' + i + ',\'park\',this.value)"></td>'
+      + '<td><input value="' + escAttr(r.species)  + '" onchange="updatePRow(' + i + ',\'species\',this.value)"></td>'
+      + '<td><input value="' + escAttr(r.girth)    + '" onchange="updatePRow(' + i + ',\'girth\',this.value)"></td>'
+      + '<td><input type="number" min="1" value="' + (r.qty||1) + '" onchange="updatePRow(' + i + ',\'qty\',this.value)"></td>'
+      + '<td><input value="' + escAttr(r.memo)     + '" onchange="updatePRow(' + i + ',\'memo\',this.value)"></td>'
+      + '<td><button class="del-row-btn" onclick="delPreviewRow(' + i + ')">✕</button></td>'
+      + '</tr>';
+  });
+
+  tbody.innerHTML = html;
+  document.getElementById('preview-count').textContent = '解析結果: ' + rows.length + ' 件（修正してから登録してください）';
+  document.getElementById('preview-section').style.display = 'block';
+  document.getElementById('preview-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function updatePRow(i, key, val) {
+  if (parsedRows[i]) parsedRows[i][key] = val;
+}
+function delPreviewRow(i) {
+  parsedRows.splice(i, 1);
+  renderPreview(parsedRows);
+}
+function addPreviewRow() {
+  parsedRows.push({ park: '', species: '', girth: '', qty: 1, memo: '' });
+  renderPreview(parsedRows);
+  // 追加した行の公園名にフォーカス
+  var rows = document.querySelectorAll('#preview-tbody tr:not(.park-header)');
+  if (rows.length) {
+    var last = rows[rows.length - 1];
+    var inp = last.querySelector('input');
+    if (inp) inp.focus();
+  }
+}
+function clearPreview() {
+  parsedRows = [];
+  document.getElementById('preview-section').style.display = 'none';
+  document.getElementById('raw-text').value = '';
+}
+
+// プレビューを確定してDBに保存
+function commitPreview() {
+  var valid = parsedRows.filter(function(r) { return r.park && r.species; });
+  if (!valid.length) { alert('公園名と樹種が入力されている行が必要です'); return; }
+
+  var done = 0;
+  var now = new Date().toISOString();
+  valid.forEach(function(r) {
+    dbAdd({
+      park:    r.park.trim(),
+      species: r.species.trim(),
+      girth:   r.girth  || '',
+      qty:     parseInt(r.qty) || 1,
+      memo:    r.memo   || '',
+      photo:   null,
+      date:    now
+    }, function() {
+      done++;
+      if (done === valid.length) {
+        clearPreview();
+        loadAndRender();
+        toast('✅ ' + done + ' 件を登録しました');
+      }
+    });
+  });
+}
+
+// =============================================
+//  フォーム入力
+// =============================================
+function saveForm() {
+  var park    = document.getElementById('f-park').value.trim();
+  var species = document.getElementById('f-species').value.trim();
+  var girth   = document.getElementById('f-girth').value.trim();
+  var qty     = parseInt(document.getElementById('f-qty').value) || 1;
+  var memo    = document.getElementById('f-memo').value.trim();
+
+  if (!park)    { alert('公園名を入力してください'); return; }
+  if (!species) { alert('樹種を入力してください');   return; }
+
+  dbAdd({ park, species, girth, qty, memo, photo: null, date: new Date().toISOString() }, function() {
+    document.getElementById('f-species').value = '';
+    document.getElementById('f-girth').value   = '';
+    document.getElementById('f-qty').value     = '1';
+    document.getElementById('f-memo').value    = '';
+    document.getElementById('f-species').focus();
+    loadAndRender();
+    toast('✅ 追加しました');
+  });
+}
+
+// =============================================
+//  写真圧縮（Canvas API）
+// =============================================
+var currentPhotoData = null;
+
+function compressPhoto(file, maxPx, quality, cb) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      var w = img.width, h = img.height;
+      if (w > maxPx || h > maxPx) {
+        if (w > h) { h = Math.round(h * maxPx / w); w = maxPx; }
+        else       { w = Math.round(w * maxPx / h); h = maxPx; }
+      }
+      var c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      cb(c.toDataURL('image/jpeg', quality));
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function handlePhoto(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  compressPhoto(file, 1200, 0.75, function(dataUrl) {
+    currentPhotoData = dataUrl;
+    var prev = document.getElementById('photo-preview');
+    prev.src = dataUrl; prev.style.display = 'block';
+    document.getElementById('photo-placeholder').style.display = 'none';
+    document.getElementById('photo-clear-btn').style.display = 'block';
+  });
+}
+function clearPhoto(e) {
+  if (e) e.stopPropagation();
+  currentPhotoData = null;
+  document.getElementById('photo-preview').style.display = 'none';
+  document.getElementById('photo-preview').src = '';
+  document.getElementById('photo-placeholder').style.display = 'block';
+  document.getElementById('photo-clear-btn').style.display = 'none';
+  document.getElementById('e-photo').value = '';
+}
+
+// =============================================
+//  編集モーダル
+// =============================================
+function openEditModal(rec) {
+  document.getElementById('edit-id').value  = rec.id;
+  document.getElementById('e-park').value   = rec.park    || '';
+  document.getElementById('e-species').value= rec.species || '';
+  document.getElementById('e-girth').value  = rec.girth   || '';
+  document.getElementById('e-qty').value    = rec.qty     || 1;
+  document.getElementById('e-memo').value   = rec.memo    || '';
+
+  currentPhotoData = rec.photo || null;
+  if (currentPhotoData) {
+    document.getElementById('photo-preview').src          = currentPhotoData;
+    document.getElementById('photo-preview').style.display = 'block';
+    document.getElementById('photo-placeholder').style.display = 'none';
+    document.getElementById('photo-clear-btn').style.display   = 'block';
+  } else {
+    clearPhoto(null);
+  }
+  document.getElementById('modal-edit').classList.add('active');
+}
+
+function saveEdit() {
+  var id      = parseInt(document.getElementById('edit-id').value);
+  var park    = document.getElementById('e-park').value.trim();
+  var species = document.getElementById('e-species').value.trim();
+  if (!park || !species) { alert('公園名と樹種は必須です'); return; }
+
+  dbPut({
+    id,
+    park,
+    species,
+    girth:  document.getElementById('e-girth').value.trim(),
+    qty:    parseInt(document.getElementById('e-qty').value) || 1,
+    memo:   document.getElementById('e-memo').value.trim(),
+    photo:  currentPhotoData,
+    date:   new Date().toISOString()
+  }, function() {
+    closeModal('modal-edit');
+    loadAndRender();
+    toast('✅ 更新しました');
+  });
+}
+
+function deleteFromModal() {
+  var id = parseInt(document.getElementById('edit-id').value);
+  if (!confirm('削除しますか？')) return;
+  dbDelete(id, function() {
+    closeModal('modal-edit');
+    loadAndRender();
+    toast('🗑️ 削除しました');
+  });
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+document.querySelectorAll('.modal-overlay').forEach(function(el) {
+  el.addEventListener('click', function(e) { if (e.target === el) closeModal(el.id); });
+});
+
+// =============================================
+//  表示・レンダリング
+// =============================================
+var currentFilter = 'all';
+var allRecords = [];
+
+function loadAndRender() {
+  dbGetAll(function(records) {
+    allRecords = records;
+    updateTabs(records);
+    updateStats(records);
+    renderCards(records);
+    updateDataLists(records);
+  });
+}
+
+function filterByPark(park, el) {
+  currentFilter = park;
+  document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+  el.classList.add('active');
+  renderCards(allRecords);
+}
+
+function updateTabs(records) {
+  var parks = [];
+  records.forEach(function(r) { if (r.park && parks.indexOf(r.park) < 0) parks.push(r.park); });
+  parks.sort();
+  var el = document.getElementById('park-tabs');
+  el.innerHTML = '<div class="tab' + (currentFilter==='all'?' active':'') + '" data-park="all" onclick="filterByPark(\'all\',this)">すべて</div>';
+  parks.forEach(function(p) {
+    var a = currentFilter === p ? ' active' : '';
+    el.innerHTML += '<div class="tab' + a + '" onclick="filterByPark(\'' + escJs(p) + '\',this)">' + escHtml(p) + '</div>';
+  });
+}
+
+function updateStats(records) {
+  var parks = [], total = 0;
+  records.forEach(function(r) {
+    if (r.park && parks.indexOf(r.park) < 0) parks.push(r.park);
+    total += parseInt(r.qty) || 0;
+  });
+  document.getElementById('stat-parks').textContent   = parks.length;
+  document.getElementById('stat-trees').textContent   = total;
+  document.getElementById('stat-records').textContent = records.length;
+}
+
+function renderCards(records) {
+  var filtered = currentFilter === 'all' ? records : records.filter(function(r) { return r.park === currentFilter; });
+  var grid  = document.getElementById('card-grid');
+  var empty = document.getElementById('empty-msg');
+
+  if (!filtered.length) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+
+  grid.innerHTML = filtered.map(function(r) {
+    var photoArea = r.photo
+      ? '<img class="card-photo-thumb" src="' + r.photo + '" alt="写真">'
+      : '<div class="card-photo-empty" onclick=\'openEditModal(' + JSON.stringify(r) + ')\' title="タップして写真を追加">📷</div>';
+
+    var metas = [];
+    if (r.girth) metas.push(r.girth);
+    if (r.qty)   metas.push(r.qty + '本');
+
+    return '<div class="tree-card">'
+      + photoArea
+      + '<div class="card-body">'
+      + '<div class="card-park">📍 ' + escHtml(r.park) + '</div>'
+      + '<div class="card-species">' + escHtml(r.species) + '</div>'
+      + '<div class="card-meta">' + metas.map(function(m) { return '<span>' + escHtml(m) + '</span>'; }).join('') + '</div>'
+      + (r.memo ? '<div class="card-memo">' + escHtml(r.memo) + '</div>' : '')
+      + '<div class="card-actions">'
+      + '<button class="btn-primary btn-sm" onclick=\'openEditModal(' + JSON.stringify(r) + ')\'>✏️ 編集</button>'
+      + '</div></div></div>';
+  }).join('');
+}
+
+function updateDataLists(records) {
+  var parks = [], species = [];
+  records.forEach(function(r) {
+    if (r.park    && parks.indexOf(r.park)       < 0) parks.push(r.park);
+    if (r.species && species.indexOf(r.species)  < 0) species.push(r.species);
+  });
+  ['park-list','park-list2'].forEach(function(id) {
+    document.getElementById(id).innerHTML = parks.map(function(p){ return '<option value="' + escAttr(p) + '">'; }).join('');
+  });
+  ['species-list','species-list2'].forEach(function(id) {
+    document.getElementById(id).innerHTML = species.map(function(s){ return '<option value="' + escAttr(s) + '">'; }).join('');
+  });
+}
+
+// =============================================
+//  CSV / JSON エクスポート / インポート
+// =============================================
+function exportCSV() {
+  dbGetAll(function(records) {
+    if (!records.length) { alert('データがありません'); return; }
+    var rows = [['ID','公園名','樹種','幹周ランク','数量','メモ','登録日']];
+    records.forEach(function(r) {
+      rows.push([r.id, r.park, r.species, r.girth||'', r.qty||'', (r.memo||'').replace(/\n/g,' '), r.date ? r.date.slice(0,10) : '']);
+    });
+    var csv = '\uFEFF' + rows.map(function(row) {
+      return row.map(function(c) {
+        var s = String(c);
+        return (s.includes(',') || s.includes('"') || s.includes('\n')) ? '"' + s.replace(/"/g,'""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    dlFile(csv, 'text/csv', '樹木台帳_' + dStr() + '.csv');
+    toast('📊 CSVをダウンロード');
+  });
+}
+
+function exportJSON() {
+  dbGetAll(function(records) {
+    if (!records.length) { alert('データがありません'); return; }
+    dlFile(JSON.stringify({ version: 2, exported: new Date().toISOString(), records }, null, 2),
+      'application/json', '樹木台帳バックアップ_' + dStr() + '.json');
+    toast('💾 JSONをダウンロード');
+  });
+}
+
+function importJSON(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var data = JSON.parse(e.target.result);
+      var list = data.records || (Array.isArray(data) ? data : null);
+      if (!list) { alert('形式が正しくありません'); return; }
+      if (!confirm(list.length + ' 件をインポートします。よろしいですか？')) return;
+      var done = 0;
+      var tx = db.transaction(STORE, 'readwrite');
+      var store = tx.objectStore(STORE);
+      list.forEach(function(r) {
+        var rec = Object.assign({}, r); delete rec.id;
+        store.add(rec).onsuccess = function() {
+          done++;
+          if (done === list.length) { loadAndRender(); toast('📥 ' + done + ' 件インポート'); }
+        };
+      });
+    } catch(err) { alert('読み込み失敗: ' + err.message); }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+// =============================================
+//  モード切替
+// =============================================
+function switchMode(mode) {
+  document.getElementById('panel-text').style.display = mode === 'text' ? 'block' : 'none';
+  document.getElementById('panel-form').style.display = mode === 'form' ? 'block' : 'none';
+  document.getElementById('tab-text').classList.toggle('active', mode === 'text');
+  document.getElementById('tab-form').classList.toggle('active', mode === 'form');
+}
+
+// =============================================
+//  ユーティリティ
+// =============================================
+function dlFile(content, mime, filename) {
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type: mime }));
+  a.download = filename; a.click();
+  URL.revokeObjectURL(a.href);
+}
+function dStr() {
+  var d = new Date();
+  return d.getFullYear() + ('0'+(d.getMonth()+1)).slice(-2) + ('0'+d.getDate()).slice(-2);
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+function escAttr(s) { return escHtml(s); }
+function escJs(s)   { return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+function toast(msg) {
+  var el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(function(){ el.classList.remove('show'); }, 2500);
+}
+
+// =============================================
+//  起動
+// =============================================
+initDB(function() { loadAndRender(); });
+</script>
+
+<footer style="text-align:center;padding:18px;font-size:0.7rem;color:var(--gray-3);border-top:1px solid var(--gray-2);margin-top:40px">
+  樹木台帳メモ v2.0 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
+</footer>
+</body>
+</html>
