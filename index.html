@@ -309,9 +309,20 @@ table.preview-tbl {
   <!-- ===== 樹種マスタパネル ===== -->
   <div id="panel-master" style="display:none;">
     <div style="background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:16px;">
-      <div style="font-size:0.9rem;font-weight:700;color:var(--green-dark);margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--green-pale);">
-        🌿 ユーザー追加樹種マスタ
-        <span style="font-size:0.75rem;font-weight:normal;color:var(--gray-3);margin-left:8px;">追加した樹種は自動判定・集計に反映されます</span>
+
+      <!-- ヘッダー -->
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--green-pale);">
+        <div>
+          <span style="font-size:0.9rem;font-weight:700;color:var(--green-dark);">🌿 樹種マスタ</span>
+          <span style="font-size:0.75rem;color:var(--gray-3);margin-left:8px;">組み込み＋ユーザー追加を一覧管理</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn-export" style="font-size:0.78rem;padding:5px 10px;" onclick="exportMasterCsv()">📥 CSVエクスポート</button>
+          <label style="display:inline-block;">
+            <button class="btn-secondary" style="font-size:0.78rem;padding:5px 10px;" onclick="document.getElementById('master-import-file').click()">📤 CSVインポート</button>
+            <input type="file" id="master-import-file" accept=".csv" style="display:none;" onchange="importMasterCsv(event)">
+          </label>
+        </div>
       </div>
 
       <!-- 追加フォーム -->
@@ -339,16 +350,28 @@ table.preview-tbl {
         <button class="btn-primary" style="padding:8px 16px;" onclick="addUserSpecies()">＋ 追加</button>
       </div>
 
-      <!-- ユーザーマスタ一覧 -->
-      <div id="user-master-list"></div>
+      <!-- 検索 -->
+      <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;">
+        <input type="text" id="master-search" placeholder="🔍 樹種名で絞り込み..."
+          style="flex:1;max-width:240px;padding:6px 10px;border:1.5px solid var(--gray-2);border-radius:6px;font-size:0.85rem;background:var(--gray-1);"
+          oninput="renderMasterTable()">
+        <span id="master-count" style="font-size:0.78rem;color:var(--gray-3);"></span>
+      </div>
 
-      <!-- 組み込みマスタ（折りたたみ） -->
-      <div style="margin-top:14px;">
-        <button onclick="toggleBuiltinMaster(this)"
-          style="background:none;border:none;font-size:0.8rem;color:var(--gray-3);cursor:pointer;padding:4px 0;">
-          ▶ 組み込みマスタを表示（読み取り専用）
-        </button>
-        <div id="builtin-master-list" style="display:none;margin-top:8px;"></div>
+      <!-- 統合マスタ一覧テーブル -->
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:0.82rem;" id="master-table">
+          <thead>
+            <tr style="background:var(--green-dark);color:#fff;">
+              <th style="padding:7px 10px;text-align:left;min-width:110px;">樹種名</th>
+              <th style="padding:7px 10px;text-align:left;min-width:110px;">種別</th>
+              <th style="padding:7px 10px;text-align:left;min-width:90px;">備考</th>
+              <th style="padding:7px 10px;text-align:center;width:60px;">出典</th>
+              <th style="padding:7px 10px;text-align:center;width:100px;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="master-tbody"></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -504,26 +527,30 @@ function quickSetSentei(id, sentei) {
 // =============================================
 var USER_SPECIES_STORE = 'userSpecies';
 
-// DB初期化時にuserSpeciesストアも作成（DB_VERをインクリメント）
-// ※ 既存DBがある場合は onupgradeneeded が再度呼ばれる必要あり
-// initDBのonupgradeneededに追記するため、initDB内でstoreを追加
-
-// ユーザーマスタを全件取得
+// =============================================
+//  IndexedDB CRUD（ユーザーマスタ）
+// =============================================
 function dbGetAllUserSpecies(cb) {
   if (!db.objectStoreNames.contains(USER_SPECIES_STORE)) { cb([]); return; }
-  db.transaction(USER_SPECIES_STORE, 'readonly').objectStore(USER_SPECIES_STORE).getAll()
+  db.transaction(USER_SPECIES_STORE,'readonly').objectStore(USER_SPECIES_STORE).getAll()
     .onsuccess = function(e) { cb(e.target.result || []); };
 }
 function dbAddUserSpecies(rec, cb) {
-  var req = db.transaction(USER_SPECIES_STORE, 'readwrite').objectStore(USER_SPECIES_STORE).add(rec);
+  var req = db.transaction(USER_SPECIES_STORE,'readwrite').objectStore(USER_SPECIES_STORE).add(rec);
   req.onsuccess = function() { cb && cb(req.result); };
 }
+function dbPutUserSpecies(rec, cb) {
+  db.transaction(USER_SPECIES_STORE,'readwrite').objectStore(USER_SPECIES_STORE).put(rec)
+    .onsuccess = function() { cb && cb(); };
+}
 function dbDeleteUserSpecies(id, cb) {
-  db.transaction(USER_SPECIES_STORE, 'readwrite').objectStore(USER_SPECIES_STORE).delete(id)
+  db.transaction(USER_SPECIES_STORE,'readwrite').objectStore(USER_SPECIES_STORE).delete(id)
     .onsuccess = function() { cb && cb(); };
 }
 
-// ユーザーマスタをメモリにキャッシュ（起動時とCRUD後に更新）
+// =============================================
+//  キャッシュ（起動時・CRUD後に更新）
+// =============================================
 var userSpeciesCache = {};
 
 function loadUserSpeciesCache(cb) {
@@ -534,112 +561,234 @@ function loadUserSpeciesCache(cb) {
   });
 }
 
-// getSpeciesType をユーザーマスタも参照するよう上書き
+// getSpeciesType: ユーザーマスタ優先で上書き
 var _origGetSpeciesType = getSpeciesType;
 function getSpeciesType(species) {
   if (!species) return null;
-  // ユーザーマスタを優先
   if (userSpeciesCache[species]) return userSpeciesCache[species];
-  // 部分一致でユーザーマスタを検索
   var keys = Object.keys(userSpeciesCache);
   for (var i = 0; i < keys.length; i++) {
-    if (species.indexOf(keys[i]) >= 0 || keys[i].indexOf(species) >= 0) {
+    if (species.indexOf(keys[i]) >= 0 || keys[i].indexOf(species) >= 0)
       return userSpeciesCache[keys[i]];
-    }
   }
-  // 組み込みマスタ
   return _origGetSpeciesType(species);
 }
 
 var TYPE_CODE_LABEL = { 'E':'常緑広葉樹', 'D':'落葉広葉樹', 'C':'針葉樹', 'L':'低木' };
 var TYPE_BADGE_COLOR = { 'E':'#2d6a4f', 'D':'#6b4226', 'C':'#1a3a2a', 'L':'#2c5f8a' };
 
+// =============================================
+//  追加
+// =============================================
 function addUserSpecies() {
   var name  = document.getElementById('nm-species').value.trim();
   var stype = document.getElementById('nm-stype').value;
   var note  = document.getElementById('nm-note').value.trim();
   if (!name)  { alert('樹種名を入力してください'); return; }
   if (!stype) { alert('種別を選択してください'); return; }
-  // 既存チェック
-  if (userSpeciesCache[name] || SPECIES_MASTER[name]) {
-    if (!confirm('"' + name + '" はすでに登録済みです。上書きしますか？')) return;
-  }
   dbAddUserSpecies({ name: name, typeCode: stype, note: note, date: new Date().toISOString() }, function() {
     document.getElementById('nm-species').value = '';
     document.getElementById('nm-stype').value   = '';
     document.getElementById('nm-note').value    = '';
-    loadUserSpeciesCache(function() {
-      renderUserMasterList();
-      toast('✅ 「' + name + '」を追加しました');
-    });
+    loadUserSpeciesCache(function() { renderMasterTable(); toast('✅ \u300c' + name + '\u300d\u3092\u8ffd\u52a0\u3057\u307e\u3057\u305f'); });
   });
 }
 
+// =============================================
+//  ユーザー追加分のインライン編集
+// =============================================
+function startEditRow(id) {
+  var row = document.getElementById('mrow-' + id);
+  if (!row) return;
+  var curName = row.getAttribute('data-name');
+  var curType = row.getAttribute('data-type');
+  var curNote = row.getAttribute('data-note');
+  var cells   = row.querySelectorAll('td');
+  cells[0].innerHTML = '<input id="edit-mname" value="' + escAttr(curName) + '" style="width:100%;padding:4px 6px;border:1.5px solid var(--green-light);border-radius:4px;font-size:0.82rem;">';
+  cells[1].innerHTML = '<select id="edit-mtype" style="padding:4px 6px;border:1.5px solid var(--green-light);border-radius:4px;font-size:0.82rem;">'
+    + ['E','D','C','L'].map(function(c){ return '<option value="'+c+'"'+(c===curType?' selected':'')+'>'+TYPE_CODE_LABEL[c]+'</option>'; }).join('')
+    + '</select>';
+  cells[2].innerHTML = '<input id="edit-mnote" value="' + escAttr(curNote) + '" style="width:100%;padding:4px 6px;border:1.5px solid var(--green-light);border-radius:4px;font-size:0.82rem;">';
+  cells[4].innerHTML = '<button class="btn-primary btn-sm" onclick="saveEditRow('+id+')">保存</button>'
+    + ' <button class="btn-secondary btn-sm" onclick="renderMasterTable()">\u53d6\u6d88</button>';
+}
+
+function saveEditRow(id) {
+  var name  = (document.getElementById('edit-mname').value || '').trim();
+  var stype = document.getElementById('edit-mtype').value;
+  var note  = (document.getElementById('edit-mnote').value || '').trim();
+  if (!name || !stype) { alert('樹種名と種別は必須です'); return; }
+  dbPutUserSpecies({ id: id, name: name, typeCode: stype, note: note, date: new Date().toISOString() }, function() {
+    loadUserSpeciesCache(function() { renderMasterTable(); toast('✅ \u66f4\u65b0\u3057\u307e\u3057\u305f'); });
+  });
+}
+
+// =============================================
+//  組み込みマスタの種別変更（ユーザーマスタに上書き登録）
+// =============================================
+function editBuiltinRow(name) {
+  var curType = SPECIES_MASTER[name] || 'E';
+  var safeId  = 'brow-' + name.replace(/[^\w]/g,'_');
+  var row = document.getElementById(safeId);
+  if (!row) return;
+  var cells = row.querySelectorAll('td');
+  cells[1].innerHTML = '<select id="edit-btype" style="padding:4px 6px;border:1.5px solid var(--green-light);border-radius:4px;font-size:0.82rem;">'
+    + ['E','D','C','L'].map(function(c){ return '<option value="'+c+'"'+(c===curType?' selected':'')+'>'+TYPE_CODE_LABEL[c]+'</option>'; }).join('')
+    + '</select>';
+  cells[4].innerHTML = '<button class="btn-primary btn-sm" onclick="saveBuiltinRow(\'' + escJs(name) + '\')">保存</button>'
+    + ' <button class="btn-secondary btn-sm" onclick="renderMasterTable()">\u53d6\u6d88</button>';
+}
+
+function saveBuiltinRow(name) {
+  var sel = document.getElementById('edit-btype');
+  if (!sel) return;
+  dbAddUserSpecies({ name: name, typeCode: sel.value, note: '\u7d44\u307f\u8fbc\u307f\u3088\u308a\u5909\u66f4', date: new Date().toISOString() }, function() {
+    loadUserSpeciesCache(function() { renderMasterTable(); toast('✅ \u300c' + name + '\u300d\u306e\u7a2e\u5225\u3092\u5909\u66f4\u3057\u307e\u3057\u305f'); });
+  });
+}
+
+// =============================================
+//  削除
+// =============================================
 function deleteUserSpecies(id, name) {
-  if (!confirm('"' + name + '" を削除しますか？')) return;
+  if (!confirm('"' + name + '" \u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f')) return;
   dbDeleteUserSpecies(id, function() {
-    loadUserSpeciesCache(function() {
-      renderUserMasterList();
-      toast('🗑️ 削除しました');
-    });
+    loadUserSpeciesCache(function() { renderMasterTable(); toast('\uD83D\uDDD1\uFE0F \u524a\u9664\u3057\u307e\u3057\u305f'); });
   });
 }
 
-function renderUserMasterList() {
-  var listEl = document.getElementById('user-master-list');
-  if (!listEl) return;
-  dbGetAllUserSpecies(function(list) {
-    if (!list.length) {
-      listEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--gray-3);font-size:0.85rem;">追加された樹種はありません</div>';
+// =============================================
+//  統合マスタテーブル描画（ユーザー追加 + 組み込み）
+// =============================================
+function renderMasterTable() {
+  var tbody   = document.getElementById('master-tbody');
+  var countEl = document.getElementById('master-count');
+  if (!tbody) return;
+  var qEl = document.getElementById('master-search');
+  var q = qEl ? qEl.value.trim().toLowerCase() : '';
+
+  dbGetAllUserSpecies(function(userList) {
+    var userNames = {};
+    userList.forEach(function(u) { userNames[u.name] = true; });
+
+    var rows = [];
+    userList.forEach(function(item) {
+      rows.push({ id: item.id, name: item.name, typeCode: item.typeCode,
+                  note: item.note || '', source: 'user' });
+    });
+    Object.keys(SPECIES_MASTER).sort().forEach(function(k) {
+      if (!userNames[k])
+        rows.push({ id: null, name: k, typeCode: SPECIES_MASTER[k], note: '', source: 'builtin' });
+    });
+
+    var filtered = q ? rows.filter(function(r){ return r.name.toLowerCase().indexOf(q) >= 0; }) : rows;
+    if (countEl) countEl.textContent = filtered.length + ' 件';
+
+    if (!filtered.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--gray-3);">\u8a72\u5f53\u306a\u3057</td></tr>';
       return;
     }
-    var html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;">'
-      + '<thead><tr style="background:var(--green-dark);color:#fff;">'
-      + '<th style="padding:7px 10px;text-align:left;">樹種名</th>'
-      + '<th style="padding:7px 10px;text-align:left;">種別</th>'
-      + '<th style="padding:7px 10px;text-align:left;">備考</th>'
-      + '<th style="padding:7px 10px;text-align:left;">登録日</th>'
-      + '<th style="padding:7px 10px;width:50px;"></th>'
-      + '</tr></thead><tbody>';
-    list.forEach(function(item, i) {
-      var col = TYPE_BADGE_COLOR[item.typeCode] || '#555';
-      var lbl = TYPE_CODE_LABEL[item.typeCode]  || item.typeCode;
-      html += '<tr style="' + (i%2===0 ? 'background:var(--gray-1)' : '') + '">'
-        + '<td style="padding:7px 10px;font-weight:700;">' + escHtml(item.name) + '</td>'
-        + '<td style="padding:7px 10px;"><span style="background:' + col + ';color:#fff;font-size:0.72rem;padding:2px 8px;border-radius:10px;">' + escHtml(lbl) + '</span></td>'
-        + '<td style="padding:7px 10px;color:#666;">' + escHtml(item.note || '') + '</td>'
-        + '<td style="padding:7px 10px;color:var(--gray-3);font-size:0.75rem;">' + (item.date ? item.date.slice(0,10) : '') + '</td>'
-        + '<td style="padding:7px 10px;"><button class="btn-danger btn-sm" onclick="deleteUserSpecies(' + item.id + ',\'' + escJs(item.name) + '\')">削除</button></td>'
+    var html = '';
+    filtered.forEach(function(r, i) {
+      var col   = TYPE_BADGE_COLOR[r.typeCode] || '#555';
+      var lbl   = TYPE_CODE_LABEL[r.typeCode]  || r.typeCode;
+      var bg    = i % 2 === 0 ? 'background:var(--gray-1)' : '';
+      var rowId = r.source === 'user' ? ('mrow-' + r.id) : ('brow-' + r.name.replace(/[^\w]/g,'_'));
+      var dataA = r.source === 'user'
+        ? 'data-name="'+escAttr(r.name)+'" data-type="'+r.typeCode+'" data-note="'+escAttr(r.note)+'"' : '';
+      var srcBadge = r.source === 'user'
+        ? '<span style="font-size:0.68rem;background:#e8f5e9;color:#2d6a4f;border:1px solid #a5d6a7;padding:1px 5px;border-radius:4px;">\u8ffd\u52a0</span>'
+        : '<span style="font-size:0.68rem;background:#f1f5f9;color:var(--gray-3);border:1px solid var(--gray-2);padding:1px 5px;border-radius:4px;">\u7d44\u8fbc</span>';
+      var ops = r.source === 'user'
+        ? '<button class="btn-primary btn-sm" onclick="startEditRow('+r.id+')">\u7de8\u96c6</button>'
+          + ' <button class="btn-danger btn-sm" onclick="deleteUserSpecies('+r.id+',\''+escJs(r.name)+'\')">\u524a\u9664</button>'
+        : '<button class="btn-secondary btn-sm" onclick="editBuiltinRow(\''+escJs(r.name)+'\')">\u7a2e\u5225\u5909\u66f4</button>';
+      html += '<tr id="'+rowId+'" style="'+bg+'" '+dataA+'>'
+        + '<td style="padding:6px 10px;font-weight:700;">'+escHtml(r.name)+'</td>'
+        + '<td style="padding:6px 10px;"><span style="background:'+col+';color:#fff;font-size:0.72rem;padding:2px 8px;border-radius:10px;">'+escHtml(lbl)+'</span></td>'
+        + '<td style="padding:6px 10px;color:#666;font-size:0.8rem;">'+escHtml(r.note)+'</td>'
+        + '<td style="padding:6px 10px;text-align:center;">'+srcBadge+'</td>'
+        + '<td style="padding:6px 10px;white-space:nowrap;">'+ops+'</td>'
         + '</tr>';
     });
-    html += '</tbody></table>';
-    listEl.innerHTML = html;
+    tbody.innerHTML = html;
   });
 }
 
-function toggleBuiltinMaster(btn) {
-  var el = document.getElementById('builtin-master-list');
-  var open = el.style.display === 'none';
-  el.style.display = open ? 'block' : 'none';
-  btn.textContent = (open ? '▼' : '▶') + ' 組み込みマスタを表示（読み取り専用）';
-  if (!open || el.innerHTML) return;
-  // 初回のみ描画
-  var LABEL = { 'E':'常緑広葉樹', 'D':'落葉広葉樹', 'C':'針葉樹', 'L':'低木' };
-  var html = '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;">'
-    + '<thead><tr style="background:#e0ddd8;"><th style="padding:5px 9px;text-align:left;">樹種名</th><th style="padding:5px 9px;text-align:left;">種別</th></tr></thead><tbody>';
-  var keys = Object.keys(SPECIES_MASTER).sort();
-  keys.forEach(function(k, i) {
-    var col = TYPE_BADGE_COLOR[SPECIES_MASTER[k]] || '#555';
-    var lbl = LABEL[SPECIES_MASTER[k]] || SPECIES_MASTER[k];
-    html += '<tr style="' + (i%2===0 ? 'background:var(--gray-1)' : '') + '">'
-      + '<td style="padding:4px 9px;">' + escHtml(k) + '</td>'
-      + '<td style="padding:4px 9px;"><span style="background:' + col + ';color:#fff;font-size:0.7rem;padding:1px 6px;border-radius:8px;">' + lbl + '</span></td>'
-      + '</tr>';
+// renderUserMasterList -> renderMasterTable に統一
+function renderUserMasterList() { renderMasterTable(); }
+
+// =============================================
+//  CSVエクスポート（全件）
+// =============================================
+function exportMasterCsv() {
+  dbGetAllUserSpecies(function(userList) {
+    var userNames = {};
+    userList.forEach(function(u) { userNames[u.name] = true; });
+    var rows = [['\u6a39\u7a2e\u540d','\u7a2e\u5225\u30b3\u30fc\u30c9','\u7a2e\u5225\u540d','\u5099\u8003','\u51fa\u5178']];
+    userList.forEach(function(u) {
+      rows.push([u.name, u.typeCode, TYPE_CODE_LABEL[u.typeCode]||'', u.note||'', '\u30e6\u30fc\u30b6\u30fc\u8ffd\u52a0']);
+    });
+    Object.keys(SPECIES_MASTER).sort().forEach(function(k) {
+      if (!userNames[k])
+        rows.push([k, SPECIES_MASTER[k], TYPE_CODE_LABEL[SPECIES_MASTER[k]]||'', '', '\u7d44\u307f\u8fbc\u307f']);
+    });
+    var csv = '\uFEFF' + rows.map(function(row) {
+      return row.map(function(c) {
+        var s = String(c);
+        return (s.indexOf(',')>=0||s.indexOf('"')>=0) ? '"'+s.replace(/"/g,'""')+'"' : s;
+      }).join(',');
+    }).join('\r\n');
+    dlFile(csv, 'text/csv', '\u6a39\u7a2e\u30de\u30b9\u30bf_' + dStr() + '.csv');
+    toast('\uD83D\uDCE5 CSV\u3092\u30a8\u30af\u30b9\u30dd\u30fc\u30c8\u3057\u307e\u3057\u305f');
   });
-  html += '</tbody></table>';
-  el.innerHTML = html;
 }
 
+// =============================================
+//  CSVインポート（1列目:樹種名, 2列目:種別コードor種別名）
+// =============================================
+function importMasterCsv(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var text  = e.target.result.replace(/^\uFEFF/,'');
+    var lines = text.split(/\r?\n/).filter(function(l){ return l.trim(); });
+    if (!lines.length) { alert('\u30d5\u30a1\u30a4\u30eb\u304c\u7a7a\u3067\u3059'); return; }
+    var start = /^[\u6a39\u7a2e\u540d\u7a2e\u5225]/.test(lines[0]) ? 1 : 0;
+    var toAdd = [], errs = [];
+    var labelToCode = {'\u5e38\u7da0\u5e83\u8449\u6a39':'E','\u843d\u8449\u5e83\u8449\u6a39':'D','\u9488\u8449\u6a39':'C','\u4f4e\u6728':'L','E':'E','D':'D','C':'C','L':'L'};
+    for (var i = start; i < lines.length; i++) {
+      var cols = lines[i].split(',');
+      var name = (cols[0]||'').replace(/^"|"$/g,'').trim();
+      var type = (cols[1]||'').replace(/^"|"$/g,'').trim();
+      var note = (cols[3]||'').replace(/^"|"$/g,'').trim();
+      if (!name) continue;
+      var code = labelToCode[type];
+      if (!code) { errs.push((i+1) + '\u884c\u76ee: \u7a2e\u5225\u4e0d\u660e\u300c' + type + '\u300d'); continue; }
+      toAdd.push({ name: name, typeCode: code, note: note, date: new Date().toISOString() });
+    }
+    if (!toAdd.length) { alert('\u30a4\u30f3\u30dd\u30fc\u30c8\u3067\u304d\u308b\u884c\u304c\u3042\u308a\u307e\u305b\u3093\u3067\u3057\u305f\u3002\n' + errs.join('\n')); return; }
+    var msg = toAdd.length + ' \u4ef6\u3092\u30a4\u30f3\u30dd\u30fc\u30c8\u3057\u307e\u3059\u3002';
+    if (errs.length) msg += '\n\uff08\u30b9\u30ad\u30c3\u30d7 ' + errs.length + ' \u884c\uff09';
+    if (!confirm(msg)) return;
+    var done = 0;
+    toAdd.forEach(function(rec) {
+      dbAddUserSpecies(rec, function() {
+        done++;
+        if (done === toAdd.length) {
+          loadUserSpeciesCache(function() {
+            renderMasterTable();
+            toast('\uD83D\uDCE4 ' + done + ' \u4ef6\u30a4\u30f3\u30dd\u30fc\u30c8\u3057\u307e\u3057\u305f');
+            if (errs.length) alert('\u30b9\u30ad\u30c3\u30d7\u3057\u305f\u884c:\n' + errs.join('\n'));
+          });
+        }
+      });
+    });
+  };
+  reader.readAsText(file, 'UTF-8');
+  event.target.value = '';
+}
 
 // =============================================
 //  IndexedDB 初期化
