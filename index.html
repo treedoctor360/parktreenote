@@ -1065,12 +1065,13 @@ function getSpeciesType(species) {
   return null; // 不明
 }
 
-// 種別コード → 工種・種類 (軽剪定デフォルト)
+// 種別コード → 工種・種類（デフォルト: 強剪定）
+// メモに「軽剪定」と明示された場合のみ軽剪定を適用する
 var TYPE_TO_KOU = {
-  'E': { kou: '剪定', type: '常緑広葉樹(軽剪定)' },
-  'D': { kou: '剪定', type: '落葉広葉樹(軽剪定)' },
-  'C': { kou: '剪定', type: '針葉樹(軽剪定)'     },
-  'L': null // 低木は別集計（ヒラドなどはm2で計上されることが多い）
+  'E': { kou: '剪定', type: '常緑広葉樹(強剪定)' },
+  'D': { kou: '剪定', type: '落葉広葉樹(強剪定)' },
+  'C': { kou: '剪定', type: '針葉樹(強剪定)'     },
+  'L': null
 };
 var TYPE_LABEL = { 'E':'常緑広葉樹', 'D':'落葉広葉樹', 'C':'針葉樹', 'L':'低木' };
 
@@ -1118,6 +1119,8 @@ function buildSummary(park) {
     var stype = getSpeciesType(r.species);
     var rank  = normalizeGirthRank(r.girth);
     var qty   = parseInt(r.qty) || 1;
+    // メモに「軽剪定」と明示されている場合は軽剪定、なければ強剪定（デフォルト）
+    var isKei = /軽剪定/.test(r.memo || '');
 
     if (!stype) {
       unknownSpecies.push({ species: r.species, girth: r.girth, qty: qty });
@@ -1132,8 +1135,10 @@ function buildSummary(park) {
     }
     var kt = TYPE_TO_KOU[stype];
     if (!kt) return;
-    var key = stype + '|' + rank;
-    if (!buckets[key]) buckets[key] = { typeCode: stype, kou: kt.kou, type: kt.type, rank: rank, qty: 0, speciesList: [] };
+    // 軽剪定指示があれば種類名を差し替え
+    var typeName = isKei ? kt.type.replace('強剪定', '軽剪定') : kt.type;
+    var key = stype + '|' + rank + '|' + (isKei ? 'kei' : 'kyo');
+    if (!buckets[key]) buckets[key] = { typeCode: stype, kou: kt.kou, type: typeName, rank: rank, qty: 0, speciesList: [] };
     buckets[key].qty += qty;
     buckets[key].speciesList.push(r.species + '×' + qty);
   });
@@ -1182,14 +1187,25 @@ function buildSummary(park) {
 // 樹高ランク取得（メモ・幹周ランクから推定）
 function getHeightRank(r) {
   var girth = r.girth || '';
-  // h150以上 → H=1.5m以上 など
+  // h150以上/以下 → v10-49の規格表記に変換
+  // v10-49の低木剪定規格: H=1.5m未満 / H=1.5-2.5m / H=2.5m以上
   var hm = girth.match(/[hH]\s*(\d+)\s*(以上|以下)/i);
   if (hm) {
     var hcm = parseInt(hm[1]);
     var isOver = hm[2] === '以上';
-    if (hcm >= 150 && isOver) return 'H=1.5m以上';
-    if (hcm >= 150 && !isOver) return 'H=1.5m未満';
     if (hcm >= 250 && isOver) return 'H=2.5m以上';
+    if (hcm >= 150 && isOver) return 'H=1.5m-2.5m';  // 150以上はH=1.5m-2.5mに
+    if (hcm >= 150 && !isOver) return 'H=1.5m未満';  // 150以下はH=1.5m未満に
+    if (hcm > 250) return 'H=2.5m以上';
+  }
+  // 数値のみ（h付きでない）の「以上/以下」表記にも対応
+  var hm2 = girth.match(/^(\d+)\s*(以上|以下)$/);
+  if (hm2) {
+    var hcm2 = parseInt(hm2[1]);
+    var isOver2 = hm2[2] === '以上';
+    if (hcm2 >= 250 && isOver2) return 'H=2.5m以上';
+    if (hcm2 >= 150 && isOver2) return 'H=1.5m-2.5m';
+    if (hcm2 >= 150 && !isOver2) return 'H=1.5m未満';
   }
   // デフォルト
   return 'H=1.5m未満';
