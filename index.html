@@ -895,34 +895,45 @@ function parseLine(line, park) {
 
   // -------------------------------------------------------
   // ③ 幹周ランク・樹高ランクの抽出
-  //    対応書式:
-  //      c60-90 / c90 / c90以上 / c90以下
-  //      60-90 (cなし、数字-数字のみ) ← 追加
-  //      150以上 / 150以下 (樹高単独) ← 追加
-  //      h150以上 / h150以下
+  //    c値が2つある場合: 最初を実測幹周(girth)、2番目をメモへ
+  //    c値が1つだけの場合: その値を幹周に使用
   // -------------------------------------------------------
-  var girthMatch =
-       line.match(/[cCｃＣ]\s*[\d.]+\s*[-‐–]\s*[\d.]+/i)     // c60-90
-    || line.match(/[cCｃＣ]\s*[\d.]+\s*(以上|以下)/i)          // c90以上
-    || line.match(/[cCｃＣ]\s*[\d.]+/i)                        // c90
-    || line.match(/[hHｈＨ]\s*[\d.]+\s*(以上|以下)/i)          // h150以上
-    || line.match(/\b(\d{2,3})\s*[-‐–]\s*(\d{2,3})\b/)        // 60-90（cなし）
-    || line.match(/\b(\d{2,3})\s*(以上|以下)\b/);              // 150以下（単独）
+  // c付きの値をすべて抽出（順序保持）
+  var cAll = [];
+  var cScanRe = /[cCｃＣ]\s*[\d.]+\s*(?:[-‐–]\s*[\d.]+)?(?:\s*(?:以上|以下))?/gi;
+  var cm;
+  while ((cm = cScanRe.exec(line)) !== null) {
+    cAll.push(cm[0].replace(/\s/g,'').replace(/[ｃＣ]/g,'c').toLowerCase());
+  }
 
+  // h値（樹高）
+  var hMatch = line.match(/[hHｈＨ]\s*[\d.]+\s*(以上|以下)/i);
+
+  // girthは最初のc値、または h値、またはcなし数字範囲
   var girth = '';
-  if (girthMatch) {
-    girth = girthMatch[0].replace(/\s/g, '')
-      .replace(/[ｃＣ]/g, 'c')
-      .replace(/[ｈＨ]/g, 'h');
+  var girthExtra = ''; // 2番目以降のc値（メモへ）
+  if (cAll.length >= 1) {
+    girth = cAll[0];
+    if (cAll.length >= 2) {
+      // 2番目以降はメモへ（c80 c60-90 の場合: girth=c80、extra=c60-90）
+      girthExtra = cAll.slice(1).join(' / ');
+    }
+  } else if (hMatch) {
+    girth = hMatch[0].replace(/\s/g,'').replace(/[ｈＨ]/g,'h');
+  } else {
+    // cなし数字範囲 / 数字以上/以下
+    var noC = line.match(/\b(\d{2,3})\s*[-‐–]\s*(\d{2,3})\b/)
+           || line.match(/\b(\d{2,3})\s*(以上|以下)\b/);
+    if (noC) girth = noC[0].replace(/\s/g,'');
   }
 
   // -------------------------------------------------------
   // ④ 樹種を行から抽出
-  //    幹周ランク・数量・面積・寸法をすべて除去した残りの先頭語
+  //    c値・h値・数量・面積・寸法をすべて除去した残りの先頭語
   // -------------------------------------------------------
   var speciesRaw = line
     .replace(/[cCｃＣhHｈＨ]?\s*[\d.]+\s*[-‐–]\s*[\d.]+\s*(以上|以下)?/gi, ' ') // 数字-数字
-    .replace(/[cCｃＣhHｈＨ]\s*[\d.]+\s*(以上|以下)?/gi, ' ')                    // c数字
+    .replace(/[cCｃＣhHｈＨ]\s*[\d.]+\s*(以上|以下)?/gi, ' ')                    // c数字/h数字
     .replace(/\b\d{2,3}\s*(以上|以下)\b/g, ' ')                                   // 数字以上/以下
     .replace(/\d+\s*本[^\s]*/g, ' ')                                               // N本
     .replace(/[=＝]?\s*[\d.]+\s*m2/gi, ' ')                                        // m2
@@ -936,25 +947,57 @@ function parseLine(line, park) {
   if (!species) return null;
 
   // -------------------------------------------------------
-  // ⑤ メモ：w/d寸法・株立・伐採・勝手生えなど
-  //    m2がある場合はメモにも残す（集計で参照するため）
+  // ⑤ メモ：
+  //    ・w/d寸法
+  //    ・m2面積
+  //    ・株立・伐採・勝手生え
+  //    ・2番目以降のc値（girthExtra）
+  //    ・その他の残余テキスト（支障枝剪定・軽剪定 等）
   // -------------------------------------------------------
   var memoParts = [];
+
+  // w/d寸法
   var wMatch = line.match(/w\s*[\d.]+/gi);
   var dMatch = line.match(/d\s*[\d.]+/gi);
   if (wMatch) memoParts.push(wMatch.join(' '));
   if (dMatch) memoParts.push(dMatch.join(' '));
+
+  // m2
   if (area !== null) memoParts.push(area + 'm2');
-  if (/株立/.test(line))     memoParts.push('株立');
-  if (/伐採/.test(line))     memoParts.push('伐採');
-  if (/勝手生え/.test(line)) memoParts.push('勝手生え');
+
+  // 2番目以降のc値（規格ランク等）
+  if (girthExtra) memoParts.push(girthExtra);
+
+  // 残余テキスト: 樹種・girth・数量・面積・寸法・計算式をすべて除去した残り
+  var residual = line
+    .replace(species, '')                                                           // 樹種
+    .replace(/[cCｃＣhHｈＨ]?\s*[\d.]+\s*[-‐–]\s*[\d.]+\s*(以上|以下)?/gi, ' ')  // 数字-数字
+    .replace(/[cCｃＣhHｈＨ]\s*[\d.]+\s*(以上|以下)?/gi, ' ')                    // c/h数字
+    .replace(/\b\d{2,3}\s*(以上|以下)\b/g, ' ')                                   // 数字以上/以下
+    .replace(/\d+\s*本/g, ' ')                                                     // N本
+    .replace(/[=＝]?\s*[\d.]+\s*m2/gi, ' ')                                        // m2
+    .replace(/w\s*[\d.]+/gi, ' ')                                                   // w寸法
+    .replace(/d\s*[\d.]+/gi, ' ')                                                   // d寸法
+    .replace(/\d{2,}\s*[✖️×xX*]\s*[\d.]+/g, ' ')                                  // 掛け算
+    .replace(/[　\s]+/g, ' ')
+    .trim();
+
+  // 残余を単語に分割し、すでにmemoPartsにあるもの・空のものを除外して追加
+  if (residual) {
+    residual.split(/[\s　]+/).forEach(function(w) {
+      w = w.trim();
+      if (!w) return;
+      if (memoParts.indexOf(w) >= 0) return;
+      memoParts.push(w);
+    });
+  }
 
   return {
     park:    park,
     species: species,
     girth:   girth,
     qty:     qty,
-    unit:    unit,   // '本' or 'm2'
+    unit:    unit,
     memo:    memoParts.join(' / ')
   };
 }
