@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>樹木台帳メモ v3.0</title>
+<title>樹木台帳メモ v3.1</title>
 
 <!-- PWA メタタグ -->
 <meta name="theme-color" content="#1a3a2a">
@@ -322,6 +322,7 @@ table.preview-tbl {
             <button class="btn-secondary" style="font-size:0.78rem;padding:5px 10px;" onclick="document.getElementById('master-import-file').click()">📤 CSVインポート</button>
             <input type="file" id="master-import-file" accept=".csv" style="display:none;" onchange="importMasterCsv(event)">
           </label>
+          <button class="btn-primary" style="font-size:0.78rem;padding:5px 10px;" onclick="exportMasterHtml()">🗎 新規HTML出力</button>
         </div>
       </div>
 
@@ -748,6 +749,32 @@ function exportMasterCsv() {
 }
 
 // =============================================
+//  新規HTML出力（現在の組み込み＋ユーザー追加を SPECIES_MASTER に焼き込んだHTML）
+//  見積査定システムの exportMasterHtml と同じ方式
+// =============================================
+function exportMasterHtml() {
+  dbGetAllUserSpecies(function(userList) {
+    // 組み込み + ユーザー追加をマージ（同名はユーザー優先）
+    var merged = {};
+    Object.keys(SPECIES_MASTER).forEach(function(k){ merged[k] = SPECIES_MASTER[k]; });
+    userList.forEach(function(u){ merged[u.name] = u.typeCode; });
+    // SPECIES_MASTER リテラルを樹種名ソートで生成
+    var names = Object.keys(merged).sort();
+    var body = names.map(function(n){
+      return "  '" + String(n).replace(/'/g, "\\'") + "':'" + merged[n] + "'";
+    }).join(',\n');
+    // 定義リテラルの先頭は分割連結し、この関数自身を誤って置換しないようにする
+    var literal = 'var SPECIES_MASTER = ' + '{\n' + body + '\n};';
+    var htmlSrc = document.documentElement.outerHTML;
+    // outerHTML には DOCTYPE が含まれないため先頭に付与
+    var newSrc = '<!DOCTYPE html>\n' + htmlSrc.replace(/var SPECIES_MASTER = \{[\s\S]*?\};/, literal);
+    if (newSrc.indexOf(literal) < 0) { alert('SPECIES_MASTER の置換に失敗しました'); return; }
+    dlFile('\uFEFF' + newSrc, 'text/html;charset=utf-8', '樹木台帳メモ_master_' + dStr() + '.html');
+    alert('\u2705 樹種マスタ ' + names.length + ' 件（うちユーザー追加 ' + userList.length + ' 件）を焼き込んだHTMLを出力しました');
+  });
+}
+
+// =============================================
 //  CSVインポート（1列目:樹種名, 2列目:種別コードor種別名）
 // =============================================
 function importMasterCsv(event) {
@@ -775,16 +802,36 @@ function importMasterCsv(event) {
     var msg = toAdd.length + ' \u4ef6\u3092\u30a4\u30f3\u30dd\u30fc\u30c8\u3057\u307e\u3059\u3002';
     if (errs.length) msg += '\n\uff08\u30b9\u30ad\u30c3\u30d7 ' + errs.length + ' \u884c\uff09';
     if (!confirm(msg)) return;
-    var done = 0;
-    toAdd.forEach(function(rec) {
-      dbAddUserSpecies(rec, function() {
-        done++;
-        if (done === toAdd.length) {
-          loadUserSpeciesCache(function() {
-            renderMasterTable();
-            toast('\uD83D\uDCE4 ' + done + ' \u4ef6\u30a4\u30f3\u30dd\u30fc\u30c8\u3057\u307e\u3057\u305f');
-            if (errs.length) alert('\u30b9\u30ad\u30c3\u30d7\u3057\u305f\u884c:\n' + errs.join('\n'));
-          });
+    // 既存ユーザーマスタを取得し、同名は更新・組み込みと同一は skip して重複を防ぐ
+    dbGetAllUserSpecies(function(existing) {
+      var byName = {};                         // 樹種名 → 既存レコード
+      existing.forEach(function(u){ byName[u.name] = u; });
+      var added = 0, updated = 0, skipped = 0, processed = 0;
+      function finish() {
+        loadUserSpeciesCache(function() {
+          renderMasterTable();
+          toast('\uD83D\uDCE4 \u8ffd\u52a0' + added + ' / \u66f4\u65b0' + updated + ' / \u30b9\u30ad\u30c3\u30d7' + skipped);
+          var m = '\u30a4\u30f3\u30dd\u30fc\u30c8\u5b8c\u4e86\n\u8ffd\u52a0: ' + added + ' \u4ef6\n\u66f4\u65b0: ' + updated + ' \u4ef6\n\u30b9\u30ad\u30c3\u30d7(\u91cd\u8907\u30fb\u7d44\u307f\u8fbc\u307f\u3068\u540c\u4e00): ' + skipped + ' \u4ef6';
+          if (errs.length) m += '\n\u7a2e\u5225\u4e0d\u660e: ' + errs.length + ' \u884c\n' + errs.join('\n');
+          alert(m);
+        });
+      }
+      function step() { processed++; if (processed === toAdd.length) finish(); }
+      if (!toAdd.length) { finish(); return; }
+      toAdd.forEach(function(rec) {
+        var ex = byName[rec.name];
+        if (ex) {
+          // 既存ユーザーマスタ: 種別・備考が同じなら skip、違えば更新(id 維持)
+          if (ex.typeCode === rec.typeCode && (ex.note||'') === (rec.note||'')) {
+            skipped++; step();
+          } else {
+            dbPutUserSpecies({ id: ex.id, name: rec.name, typeCode: rec.typeCode, note: rec.note, date: rec.date }, function(){ updated++; step(); });
+          }
+        } else if (SPECIES_MASTER[rec.name] === rec.typeCode && !rec.note) {
+          // 組み込みマスタと種別が同一かつ備考なし: 登録不要(重複防止)
+          skipped++; step();
+        } else {
+          dbAddUserSpecies(rec, function(){ added++; step(); });
         }
       });
     });
@@ -1948,7 +1995,7 @@ if ('serviceWorker' in navigator) {
 </script>
 
 <footer style="text-align:center;padding:18px;font-size:0.7rem;color:var(--gray-3);border-top:1px solid var(--gray-2);margin-top:40px">
-  樹木台帳メモ v3.0 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
+  樹木台帳メモ v3.1 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
 </footer>
 </body>
 </html>
