@@ -959,6 +959,18 @@ function parseText() {
 
 function parseLine(line, park) {
   // -------------------------------------------------------
+  // ⓪ インライン摘要: 「//」以降は解析せず摘要としてメモ末尾に保持
+  //    （伐採・軽剪定の自動判定からも除外される）
+  // -------------------------------------------------------
+  var note = '';
+  var noteIdx = line.indexOf('//');
+  if (noteIdx >= 0) {
+    note = line.slice(noteIdx + 2).trim();
+    line = line.slice(0, noteIdx).trim();
+    if (!line) return null; // 品目部分が空なら行ごとコメント扱い
+  }
+
+  // -------------------------------------------------------
   // ① m2面積パターンを最初に確認
   //    「Xm2」または「= Xm2」が含まれる場合は unit='m2' として扱う
   // -------------------------------------------------------
@@ -1108,13 +1120,17 @@ function parseLine(line, park) {
     });
   }
 
+  // インライン摘要は「//」マーカー付きでメモ末尾へ（判定除外の目印を兼ねる）
+  var memo = memoParts.join(' / ');
+  if (note) memo += (memo ? ' ' : '') + '//' + note;
+
   return {
     park:    park,
     species: species,
     girth:   girth,
     qty:     qty,
     unit:    unit,
-    memo:    memoParts.join(' / ')
+    memo:    memo
   };
 }
 
@@ -1820,14 +1836,24 @@ function getSpeciesTypeBuiltin(species) {
 // =============================================
 //  剪定種別のメモ判定ヘルパー
 // =============================================
-// 伐採判定: 「伐採含む」「伐採済(み)」は剪定行の注記なので除外してから「伐採」を探す
+// 摘要部分（「//」以降）は自動判定の対象外
+function stripNote(memo) {
+  var s = String(memo || '');
+  var i = s.indexOf('//');
+  return i >= 0 ? s.slice(0, i) : s;
+}
+// 伐採判定: 「伐採含む」「伐採済(み)」「〜で伐採」「〜から伐採」は
+// 剪定行の注記なので除外してから「伐採」を探す（伐採行は「伐採」単独表記）
 function hasBassai(memo) {
-  var m = (memo || '').replace(/伐採含む/g, '').replace(/伐採済み?/g, '');
+  var m = stripNote(memo)
+    .replace(/伐採含む/g, '')
+    .replace(/伐採済み?/g, '')
+    .replace(/(?:で|から)伐採/g, '');
   return m.indexOf('伐採') >= 0;
 }
 // 軽剪定判定: 「軽剪定」明記のほか「支障」「枯れ枝」「枯枝」も軽剪定として扱う
 function isKeiSentei(memo) {
-  memo = memo || '';
+  memo = stripNote(memo);
   return memo.indexOf('軽剪定') >= 0 || memo.indexOf('支障') >= 0
       || memo.indexOf('枯れ枝') >= 0 || memo.indexOf('枯枝') >= 0;
 }
