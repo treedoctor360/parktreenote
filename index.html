@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>樹木台帳メモ v3.1</title>
+<title>樹木台帳メモ v3.2</title>
 
 <!-- PWA メタタグ -->
 <meta name="theme-color" content="#1a3a2a">
@@ -588,17 +588,17 @@ function loadUserSpeciesCache(cb) {
   });
 }
 
-// getSpeciesType: ユーザーマスタ優先で上書き
-var _origGetSpeciesType = getSpeciesType;
+// getSpeciesType: ユーザーマスタ優先で判定し、なければ組み込みマスタへフォールバック
+// 部分一致は「樹種名がマスタキーを含む」方向のみ（逆方向は誤爆するため使わない）
 function getSpeciesType(species) {
   if (!species) return null;
   if (userSpeciesCache[species]) return userSpeciesCache[species];
   var keys = Object.keys(userSpeciesCache);
   for (var i = 0; i < keys.length; i++) {
-    if (species.indexOf(keys[i]) >= 0 || keys[i].indexOf(species) >= 0)
+    if (species.indexOf(keys[i]) >= 0)
       return userSpeciesCache[keys[i]];
   }
-  return _origGetSpeciesType(species);
+  return getSpeciesTypeBuiltin(species);
 }
 
 var TYPE_CODE_LABEL = { 'E':'常緑広葉樹', 'D':'落葉広葉樹', 'C':'針葉樹', 'L':'低木' };
@@ -931,11 +931,18 @@ function parseText() {
     line = line.trim();
     if (!line) return;
 
+    // 区切り行 (---): 公園をリセット（次の # まで品目行を無視）
+    if (/^[-ー－—]{2,}$/.test(line)) { currentPark = ''; return; }
+    // コメント行（// または ※ 始まり）はスキップ
+    if (/^\/\/|^※/.test(line)) return;
+
     // 公園名行: # で始まる
     if (/^#/.test(line)) {
       currentPark = line.replace(/^#+\s*/, '').trim();
       return;
     }
+    // 公園未確定の行（先頭の日付行・班名行など）はスキップ
+    if (!currentPark) return;
     // 「入り口から」などナビゲーション注釈行はスキップ
     if (/^入り口|^奥から|^右側|^左側|^北|^南|^東|^西/.test(line)) return;
 
@@ -958,6 +965,16 @@ function parseLine(line, park) {
   var areaMatch = line.match(/[=＝]?\s*([\d.]+)\s*m2/i)
                || line.match(/([\d.]+)\s*[mｍ]2/i);
   var area    = areaMatch ? parseFloat(areaMatch[1]) : null;
+
+  // w×d からの面積自動計算（m2明示がない場合のみ / w・d は cm 単位）
+  // 「×N個」「×N箇所」の表記があれば N 倍する
+  var wVal = line.match(/w\s*([\d.]+)/i);
+  var dVal = line.match(/d\s*([\d.]+)/i);
+  if (area === null && wVal && dVal) {
+    var multM = line.match(/[×✕✖xX*]\s*(\d+)\s*(?:個|箇所)/);
+    var mult  = multM ? parseInt(multM[1]) : 1;
+    area = Math.round((parseFloat(wVal[1]) / 100) * (parseFloat(dVal[1]) / 100) * mult * 100) / 100;
+  }
   var unit    = area !== null ? 'm2' : '本';
 
   // -------------------------------------------------------
@@ -987,8 +1004,15 @@ function parseLine(line, park) {
     cAll.push(cm[0].replace(/\s/g,'').replace(/[ｃＣ]/g,'c').toLowerCase());
   }
 
-  // h値（樹高）
-  var hMatch = line.match(/[hHｈＨ]\s*[\d.]+\s*(以上|以下)/i);
+  // h値（樹高）: 以上/以下付きはランク、裸h（h120等）は実測値
+  var hRanked = [], hBare = [];
+  var hScanRe = /[hHｈＨ]\s*[\d.]+\s*(?:以上|以下)?/g;
+  var hTok;
+  while ((hTok = hScanRe.exec(line)) !== null) {
+    var ht = hTok[0].replace(/\s/g,'').replace(/[ｈＨH]/g,'h');
+    if (/以上|以下/.test(ht)) hRanked.push(ht); else hBare.push(ht);
+  }
+  var hBareUsed = false;
 
   // girthは最初のc値、または h値、またはcなし数字範囲
   var girth = '';
@@ -999,8 +1023,12 @@ function parseLine(line, park) {
       // 2番目以降はメモへ（c80 c60-90 の場合: girth=c80、extra=c60-90）
       girthExtra = cAll.slice(1).join(' / ');
     }
-  } else if (hMatch) {
-    girth = hMatch[0].replace(/\s/g,'').replace(/[ｈＨ]/g,'h');
+  } else if (hRanked.length) {
+    girth = hRanked[0];
+  } else if (hBare.length) {
+    // ランク付きhがなく裸hのみの行（例: サツキ h100 w500 d100）は裸hを規格に使う
+    girth = hBare[0];
+    hBareUsed = true;
   } else {
     // cなし数字範囲 / 数字以上/以下
     var noC = line.match(/\b(\d{2,3})\s*[-‐–]\s*(\d{2,3})\b/)
@@ -1045,6 +1073,13 @@ function parseLine(line, park) {
 
   // m2
   if (area !== null) memoParts.push(area + 'm2');
+
+  // 面積優先の行に「N本」が併記されていた場合は本数をメモに保持
+  if (area !== null && qtyMatch) memoParts.push(qtyMatch[1] + '本');
+
+  // 規格に使わなかった裸h（実測値）はメモに保持
+  var hKeep = hBareUsed ? hBare.slice(1) : hBare;
+  if (hKeep.length) memoParts.push(hKeep.map(function(t){ return t + '(実測)'; }).join(' '));
 
   // 2番目以降のc値（規格ランク等）
   if (girthExtra) memoParts.push(girthExtra);
@@ -1655,6 +1690,11 @@ var SPECIES_MASTER = {
   'スギ':'C','ヒノキ':'C','サワラ':'C','ヒバ':'C',
   'カイヅカイブキ':'C','ビャクシン':'C','ネズ':'C','コノテガシワ':'C',
   'モミ':'C','ツガ':'C','トドマツ':'C','エゾマツ':'C',
+  // v3.2 追加分
+  'ツバキ':'E','ヒメユズリハ':'E','キョウチクトウ':'E','ナワシログミ':'E',
+  'ハゼノキ':'D','アカメガシワ':'D',
+  'ツゲ':'L',
+  'ヒマラヤスギ':'C',
 };
 
 // 幹周の実測値(cm) → ランク文字列に変換
@@ -1761,15 +1801,15 @@ function normalizeGirthRankBySentei(str, sentei) {
 // 後方互換: 強剪定用として既存コードから呼ばれる
 function normalizeGirthRank(str) { return normalizeGirthRankBySentei(str, '強剪定'); }
 
-// 樹種から種別コードを取得（部分一致も試みる）
-function getSpeciesType(species) {
+// 組み込みマスタから種別コードを取得（ユーザーマスタ込みの判定は前方の getSpeciesType を使う）
+// 部分一致は「樹種名がマスタキーを含む」方向のみ（ヒマラヤスギ→スギは可、ツバキ→ナツツバキの誤爆は防ぐ）
+function getSpeciesTypeBuiltin(species) {
   if (!species) return null;
   // 完全一致
   if (SPECIES_MASTER[species]) return SPECIES_MASTER[species];
-  // 前方一致（例: "ソメイヨシノ" → "サクラ" 系はDなど）
   var keys = Object.keys(SPECIES_MASTER);
   for (var i = 0; i < keys.length; i++) {
-    if (species.indexOf(keys[i]) >= 0 || keys[i].indexOf(species) >= 0) {
+    if (species.indexOf(keys[i]) >= 0) {
       return SPECIES_MASTER[keys[i]];
     }
   }
@@ -1778,13 +1818,28 @@ function getSpeciesType(species) {
 
 
 // =============================================
+//  剪定種別のメモ判定ヘルパー
+// =============================================
+// 伐採判定: 「伐採含む」「伐採済(み)」は剪定行の注記なので除外してから「伐採」を探す
+function hasBassai(memo) {
+  var m = (memo || '').replace(/伐採含む/g, '').replace(/伐採済み?/g, '');
+  return m.indexOf('伐採') >= 0;
+}
+// 軽剪定判定: 「軽剪定」明記のほか「支障」「枯れ枝」「枯枝」も軽剪定として扱う
+function isKeiSentei(memo) {
+  memo = memo || '';
+  return memo.indexOf('軽剪定') >= 0 || memo.indexOf('支障') >= 0
+      || memo.indexOf('枯れ枝') >= 0 || memo.indexOf('枯枝') >= 0;
+}
+
+// =============================================
 //  保存前正規化: 種別・ランクを確定してDBに保存する
 //  呼び出し: commitPreview / saveForm / saveEdit
 // =============================================
 function normalizeRecord(r) {
-  // 剪定種別を先に確定
-  var sb = r.senteiBetsu || '強剪定';
-  if ((r.memo || '').indexOf('伐採') >= 0) sb = '伐採';
+  // 剪定種別を先に確定（優先順位: 伐採 > 軽剪定キーワード > 強剪定）
+  var sb = r.senteiBetsu || (isKeiSentei(r.memo) ? '軽剪定' : '強剪定');
+  if (hasBassai(r.memo)) sb = '伐採';
   // 幹周ランクを剪定種別に応じて正規化 (c80+強剪定 → C=60-90 など)
   var girthRank = normalizeGirthRankBySentei(r.girth || '', sb);
 
@@ -1803,10 +1858,8 @@ function normalizeRecord(r) {
     else if (stypeCode === 'L') specTypeLabel = '低木';
   }
 
-  // 剪定種別: 既存の senteiBetsu があればそれを引き継ぐ、なければデフォルト強剪定
-  // ただしメモに「伐採」があれば伐採に
-  var senteiBetsu = r.senteiBetsu || '強剪定';
-  if ((r.memo || '').indexOf('伐採') >= 0) senteiBetsu = '伐採';
+  // 剪定種別: 冒頭で確定済み（伐採 > 軽剪定キーワード > 強剪定）
+  var senteiBetsu = sb;
 
   return {
     park:        (r.park  || '').trim(),
@@ -1859,12 +1912,12 @@ function buildSummary(park) {
 
   var targets = allRecords.filter(function(r) { return r.park === park; });
 
-  // 伐採判定: senteiBetsu==='伐採' またはメモに「伐採」を含む行
+  // 伐採判定: senteiBetsu==='伐採' またはメモに「伐採」を含む行（「伐採含む」等は除外）
   var bassai = targets.filter(function(r) {
-    return r.senteiBetsu === '伐採' || (r.memo || '').indexOf('伐採') >= 0;
+    return r.senteiBetsu === '伐採' || hasBassai(r.memo);
   });
   var sentei = targets.filter(function(r) {
-    return r.senteiBetsu !== '伐採' && (r.memo || '').indexOf('伐採') < 0;
+    return r.senteiBetsu !== '伐採' && !hasBassai(r.memo);
   });
 
   // 低木（m2で管理されているもの）を別集計
@@ -1890,8 +1943,8 @@ function buildSummary(park) {
     }
     if (!stype) stype = getSpeciesType(r.species);
 
-    // senteiBetsu（旧データはmemoから補完）
-    var sb = r.senteiBetsu || (/軽剪定/.test(r.memo || '') ? '軽剪定' : '強剪定');
+    // senteiBetsu（旧データはmemoから補完。支障枝・枯れ枝も軽剪定扱い）
+    var sb = r.senteiBetsu || (isKeiSentei(r.memo) ? '軽剪定' : '強剪定');
     var isKei = (sb === '軽剪定');
 
     // senteiBetsuに応じたランク変換（規格の境界がKei/Kyo/伐採で異なる）
@@ -1927,7 +1980,8 @@ function buildSummary(park) {
   });
 
   // === m2集計 ===
-  var m2buckets = {}; // key: "高さランク"
+  var m2buckets = {}; // key: "工種|高さランク"
+  var fujiBucket = null; // フジ棚(冬季)専用集計（規格なし）
   teiboM2.forEach(function(r) {
     // m2の取得: qtyがm2単位の場合はqtyを使い、なければmemoから抽出
     var area = 0;
@@ -1938,6 +1992,14 @@ function buildSummary(park) {
       area = mm ? parseFloat(mm[1]) : 0;
     }
     if (!area) return;
+
+    // フジ系のw/d面積行は「低木剪定(強剪定)/フジ棚(冬季)」として専用集計
+    if ((r.species || '').indexOf('フジ') >= 0) {
+      if (!fujiBucket) fujiBucket = { kou: '低木剪定(強剪定)', type: 'フジ棚(冬季)', area: 0, speciesList: [] };
+      fujiBucket.area += area;
+      fujiBucket.speciesList.push(r.species + '(' + area + 'm2)');
+      return;
+    }
 
     // senteiBetsuで工種・種類を決定
     var sb = r.senteiBetsu || '強剪定';
@@ -1971,8 +2033,8 @@ function buildSummary(park) {
   });
 
   // テーブルとテキストを描画
-  renderSummaryTable(buckets, m2buckets, bassaiBuckets, unknownSpecies);
-  buildTransferText(buckets, m2buckets, bassaiBuckets);
+  renderSummaryTable(buckets, m2buckets, fujiBucket, bassaiBuckets, unknownSpecies);
+  buildTransferText(buckets, m2buckets, fujiBucket, bassaiBuckets);
 
   // 未判定警告
   var ukEl = document.getElementById('summary-unknown');
@@ -1988,34 +2050,25 @@ function buildSummary(park) {
   }
 }
 
-// 樹高ランク取得（メモ・幹周ランクから推定）
+// 樹高ランク取得（規格欄のh値から判定）
+// v10-49の低木剪定規格: H=1.5m未満 / H=1.5-2.5m / H=2.5m以上
+// 「h150以下」は1.5m未満側、「h150」ちょうど・「h150以上」は1.5-2.5m側、裸h（h100等）にも対応
 function getHeightRank(r) {
   var girth = r.girth || '';
-  // h150以上/以下 → v10-49の規格表記に変換
-  // v10-49の低木剪定規格: H=1.5m未満 / H=1.5-2.5m / H=2.5m以上
-  var hm = girth.match(/[hH]\s*(\d+)\s*(以上|以下)/i);
+  var hm = girth.match(/[hHｈＨ]\s*(\d+)\s*(以上|以下)?/)
+        || girth.match(/^(\d+)\s*(以上|以下)$/);
   if (hm) {
     var hcm = parseInt(hm[1]);
-    var isOver = hm[2] === '以上';
-    if (hcm >= 250 && isOver) return 'H=2.5m以上';
-    if (hcm >= 150 && isOver) return 'H=1.5-2.5m';   // 150以上はH=1.5-2.5mに
-    if (hcm >= 150 && !isOver) return 'H=1.5m未満';  // 150以下はH=1.5m未満に
-    if (hcm > 250) return 'H=2.5m以上';
+    if (hm[2] === '以下') hcm = hcm - 0.1; // 「以下」は上限値の直下として扱う
+    if (hcm >= 250) return 'H=2.5m以上';
+    if (hcm >= 150) return 'H=1.5-2.5m';
+    return 'H=1.5m未満';
   }
-  // 数値のみ（h付きでない）の「以上/以下」表記にも対応
-  var hm2 = girth.match(/^(\d+)\s*(以上|以下)$/);
-  if (hm2) {
-    var hcm2 = parseInt(hm2[1]);
-    var isOver2 = hm2[2] === '以上';
-    if (hcm2 >= 250 && isOver2) return 'H=2.5m以上';
-    if (hcm2 >= 150 && isOver2) return 'H=1.5-2.5m';
-    if (hcm2 >= 150 && !isOver2) return 'H=1.5m未満';
-  }
-  // デフォルト
+  // h値なし → デフォルト
   return 'H=1.5m未満';
 }
 
-function renderSummaryTable(buckets, m2buckets, bassaiBuckets, unknownSpecies) {
+function renderSummaryTable(buckets, m2buckets, fujiBucket, bassaiBuckets, unknownSpecies) {
   var html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;">'
     + '<thead><tr style="background:var(--green-dark);color:#fff;">'
     + '<th style="padding:7px 10px;text-align:left;">工種</th>'
@@ -2049,6 +2102,16 @@ function renderSummaryTable(buckets, m2buckets, bassaiBuckets, unknownSpecies) {
       + '</tr>';
   });
 
+  // フジ棚(冬季)集計（規格なし）
+  if (fujiBucket) {
+    html += '<tr style="' + bg() + '">'
+      + '<td style="padding:6px 10px;">' + escHtml(fujiBucket.kou) + '</td>'
+      + '<td style="padding:6px 10px;">' + escHtml(fujiBucket.type) + '</td>'
+      + '<td style="padding:6px 10px;text-align:right;font-weight:700;">' + fujiBucket.area.toFixed(2) + '</td>'
+      + '<td style="padding:6px 10px;">m2</td>'
+      + '</tr>';
+  }
+
   // 伐採集計
   Object.keys(bassaiBuckets).forEach(function(k) {
     var b = bassaiBuckets[k];
@@ -2060,7 +2123,7 @@ function renderSummaryTable(buckets, m2buckets, bassaiBuckets, unknownSpecies) {
       + '</tr>';
   });
 
-  if (!Object.keys(buckets).length && !Object.keys(m2buckets).length && !Object.keys(bassaiBuckets).length) {
+  if (!Object.keys(buckets).length && !Object.keys(m2buckets).length && !fujiBucket && !Object.keys(bassaiBuckets).length) {
     html += '<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--gray-3);">集計できる項目がありません（幹周ランクを確認してください）</td></tr>';
   }
 
@@ -2072,7 +2135,7 @@ function renderSummaryTable(buckets, m2buckets, bassaiBuckets, unknownSpecies) {
 // 書式: 工種\t種類・規格\t単位\t数量
 // ※ v10-49のCSVインポート形式（工種,種類,規格,単位,単価）とは別
 //    手動転記しやすいよう「工種 / 種類規格 / 単位 / 数量」の一覧形式にする
-function buildTransferText(buckets, m2buckets, bassaiBuckets) {
+function buildTransferText(buckets, m2buckets, fujiBucket, bassaiBuckets) {
   var lines = [];
   lines.push('【v10-49 転記用】工種 / 種類・規格 / 単位 / 数量 / 摘要');
   lines.push('----------------------------------------');
@@ -2087,6 +2150,10 @@ function buildTransferText(buckets, m2buckets, bassaiBuckets) {
     var memo = (b.speciesList || []).join('、');
     lines.push(b.kou + '\t' + b.type + ' ' + b.hRank + '\tm2\t' + b.area.toFixed(2) + '\t' + memo);
   });
+  if (fujiBucket) {
+    // フジ棚(冬季)は規格が空のため種類名のみ（v10-59マスタと一字一句一致させる）
+    lines.push(fujiBucket.kou + '\t' + fujiBucket.type + '\tm2\t' + fujiBucket.area.toFixed(2) + '\t' + (fujiBucket.speciesList || []).join('、'));
+  }
   Object.keys(bassaiBuckets).forEach(function(k) {
     var b = bassaiBuckets[k];
     var memo = (b.speciesList || []).join('、');
@@ -2127,7 +2194,7 @@ if ('serviceWorker' in navigator) {
 </script>
 
 <footer style="text-align:center;padding:18px;font-size:0.7rem;color:var(--gray-3);border-top:1px solid var(--gray-2);margin-top:40px">
-  樹木台帳メモ v3.1 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
+  樹木台帳メモ v3.2 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
 </footer>
 </body>
 </html>
