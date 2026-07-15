@@ -172,6 +172,21 @@ table.preview-tbl {
 /* 写真追加ボタン（カード上の小さいもの） */
 .add-photo-btn { background: var(--green-pale); color: var(--green-mid); border: 1px dashed var(--green-mid); font-size: 0.72rem; padding: 3px 8px; }
 
+/* ===== 一括削除（選択モード） ===== */
+#bulk-bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+#bulk-controls { display: none; gap: 6px; flex-wrap: wrap; align-items: center; }
+#bulk-del-btn:disabled { opacity: .45; cursor: default; }
+.tree-card.selectable { position: relative; cursor: pointer; user-select: none; }
+.tree-card.selectable .card-check {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid var(--gray-3); background: rgba(255,255,255,.92);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.9rem; color: transparent; font-weight: 700;
+}
+.tree-card.selected { border-left-color: #d64040; outline: 2px solid #d64040; }
+.tree-card.selected .card-check { background: #d64040; border-color: #d64040; color: #fff; }
+
 /* ===== 空表示 ===== */
 #empty-msg { text-align: center; padding: 50px 20px; color: var(--gray-3); font-size: 0.9rem; display: none; }
 #empty-msg .icon { font-size: 2.5rem; display: block; margin-bottom: 8px; }
@@ -199,7 +214,7 @@ table.preview-tbl {
 /* ===== 印刷 ===== */
 @media print {
   header, .input-mode-tabs, .parse-area, #park-tabs, .card-actions,
-  #stats-bar, #preview-section, #empty-msg button { display: none !important; }
+  #stats-bar, #preview-section, #bulk-bar, #empty-msg button { display: none !important; }
   body { background: #fff; }
   .tree-card { break-inside: avoid; }
   #card-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
@@ -386,6 +401,17 @@ table.preview-tbl {
 
   <!-- ===== 公園タブ ===== -->
   <div id="park-tabs"><div class="tab active" data-park="all" onclick="filterByPark('all',this)">すべて</div></div>
+
+  <!-- ===== 一括削除バー ===== -->
+  <div id="bulk-bar">
+    <button id="bulk-toggle-btn" class="btn-secondary btn-sm" onclick="toggleBulkMode()">☑ 選択して一括削除</button>
+    <span id="bulk-controls">
+      <button class="btn-secondary btn-sm" onclick="bulkSelectAll()">表示中を全選択</button>
+      <button class="btn-secondary btn-sm" onclick="bulkClearSel()">全解除</button>
+      <button id="bulk-del-btn" class="btn-danger btn-sm" disabled onclick="bulkDeleteSelected()">🗑️ 選択した 0 件を削除</button>
+    </span>
+    <button id="park-del-btn" class="btn-danger btn-sm" style="display:none" onclick="deleteParkRecords()">🗑️ この公園をまるごと削除</button>
+  </div>
 
   <!-- ===== 集計パネル（公園選択時に表示） ===== -->
   <div id="summary-panel" style="display:none;margin-bottom:16px;background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;">
@@ -877,6 +903,14 @@ function dbPut(rec, cb) {
 function dbDelete(id, cb) {
   db.transaction(STORE,'readwrite').objectStore(STORE).delete(id).onsuccess = function(){ cb && cb(); };
 }
+function dbDeleteMany(ids, cb) {
+  if (!ids.length) { cb && cb(); return; }
+  var tx = db.transaction(STORE, 'readwrite');
+  var store = tx.objectStore(STORE);
+  ids.forEach(function(id) { store.delete(id); });
+  tx.oncomplete = function() { cb && cb(); };
+  tx.onerror = function() { alert('削除に失敗しました'); };
+}
 
 // =============================================
 //  テキスト解析
@@ -1328,13 +1362,111 @@ function updateStats(records) {
   document.getElementById('stat-records').textContent = records.length;
 }
 
+// =============================================
+//  一括削除（選択モード / 公園まるごと削除）
+// =============================================
+var bulkMode = false;
+var selectedIds = {}; // id → true
+
+function toggleBulkMode() {
+  bulkMode = !bulkMode;
+  selectedIds = {};
+  var btn = document.getElementById('bulk-toggle-btn');
+  btn.textContent = bulkMode ? '✕ 選択モードを終了' : '☑ 選択して一括削除';
+  btn.className   = bulkMode ? 'btn-accent btn-sm' : 'btn-secondary btn-sm';
+  document.getElementById('bulk-controls').style.display = bulkMode ? 'inline-flex' : 'none';
+  renderCards(allRecords);
+}
+
+function toggleSelect(id) {
+  var card = document.getElementById('bcard-' + id);
+  if (selectedIds[id]) {
+    delete selectedIds[id];
+    if (card) card.classList.remove('selected');
+  } else {
+    selectedIds[id] = true;
+    if (card) card.classList.add('selected');
+  }
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  var n = Object.keys(selectedIds).length;
+  var btn = document.getElementById('bulk-del-btn');
+  btn.textContent = '🗑️ 選択した ' + n + ' 件を削除';
+  btn.disabled = !n;
+}
+
+function bulkSelectAll() {
+  var filtered = currentFilter === 'all' ? allRecords : allRecords.filter(function(r) { return r.park === currentFilter; });
+  filtered.forEach(function(r) { selectedIds[r.id] = true; });
+  renderCards(allRecords);
+}
+
+function bulkClearSel() {
+  selectedIds = {};
+  renderCards(allRecords);
+}
+
+function bulkDeleteSelected() {
+  var ids = Object.keys(selectedIds).map(Number);
+  if (!ids.length) { alert('削除するカードを選択してください'); return; }
+  if (!confirm('選択した ' + ids.length + ' 件を削除します。よろしいですか？\n（この操作は元に戻せません）')) return;
+  dbDeleteMany(ids, function() {
+    selectedIds = {};
+    loadAndRender();
+    toast('🗑️ ' + ids.length + ' 件を削除しました');
+  });
+}
+
+function deleteParkRecords() {
+  if (currentFilter === 'all') return;
+  var park = currentFilter;
+  var targets = allRecords.filter(function(r) { return r.park === park; });
+  if (!targets.length) { alert('この公園のレコードがありません'); return; }
+  if (!confirm('公園「' + park + '」の全 ' + targets.length + ' 件を削除します。よろしいですか？\n（この操作は元に戻せません）')) return;
+  dbDeleteMany(targets.map(function(r) { return r.id; }), function() {
+    selectedIds = {};
+    currentFilter = 'all';
+    closeSummary();
+    loadAndRender();
+    toast('🗑️ 「' + park + '」の ' + targets.length + ' 件を削除しました');
+  });
+}
+
 function renderCards(records) {
   var filtered = currentFilter === 'all' ? records : records.filter(function(r) { return r.park === currentFilter; });
   var grid  = document.getElementById('card-grid');
   var empty = document.getElementById('empty-msg');
 
+  // 公園まるごと削除ボタン: 特定の公園を選択中のみ表示
+  var pdb = document.getElementById('park-del-btn');
+  if (pdb) pdb.style.display = currentFilter === 'all' ? 'none' : 'inline-block';
+  if (bulkMode) updateBulkBar();
+
   if (!filtered.length) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
   empty.style.display = 'none';
+
+  // 選択モード: カード全体が選択トグルになる簡易表示
+  if (bulkMode) {
+    grid.innerHTML = filtered.map(function(r) {
+      var sel = !!selectedIds[r.id];
+      var photoArea = r.photo ? '<img class="card-photo-thumb" src="' + r.photo + '" alt="写真">' : '';
+      var metas = [];
+      if (r.girthRank || r.girth) metas.push(r.girthRank || r.girth);
+      if (r.qty) metas.push(r.qty + (r.unit || '本'));
+      return '<div class="tree-card selectable' + (sel ? ' selected' : '') + '" id="bcard-' + r.id + '" onclick="toggleSelect(' + r.id + ')">'
+        + '<div class="card-check">✓</div>'
+        + photoArea
+        + '<div class="card-body">'
+        + '<div class="card-park">📍 ' + escHtml(r.park) + '</div>'
+        + '<div class="card-species">' + escHtml(r.species) + '</div>'
+        + '<div class="card-meta">' + metas.map(function(m) { return '<span>' + escHtml(m) + '</span>'; }).join('') + '</div>'
+        + (r.memo ? '<div class="card-memo">' + escHtml(r.memo) + '</div>' : '')
+        + '</div></div>';
+    }).join('');
+    return;
+  }
 
   grid.innerHTML = filtered.map(function(r) {
     var photoArea = r.photo
