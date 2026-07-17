@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>樹木台帳メモ v3.2</title>
+<title>樹木台帳メモ v4.2</title>
 
 <!-- PWA メタタグ -->
 <meta name="theme-color" content="#1a3a2a">
@@ -236,6 +236,7 @@ table.preview-tbl {
     <button class="btn-accent" onclick="openSummary()">📊 集計</button>
     <button class="btn-export" onclick="exportCSV()">CSV</button>
     <button class="btn-export" onclick="exportJSON()">JSON</button>
+    <button class="btn-export" onclick="openPExportModal()">プリザンター</button>
     <button class="btn-secondary" onclick="window.print()">印刷</button>
     <label>
       <button class="btn-secondary" onclick="document.getElementById('import-file').click()">復元</button>
@@ -323,6 +324,32 @@ table.preview-tbl {
 
   <!-- ===== 樹種マスタパネル ===== -->
   <div id="panel-master" style="display:none;">
+
+    <!-- v4.1: 公園マスタ（プリザンター表記合わせ） -->
+    <div style="background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid var(--green-pale);">
+        <div>
+          <span style="font-size:0.9rem;font-weight:700;color:var(--green-dark);">🏞 公園マスタ</span>
+          <span style="font-size:0.75rem;color:var(--gray-3);margin-left:8px;" id="park-master-status">未登録</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <label style="display:inline-block;">
+            <button class="btn-secondary" style="font-size:0.78rem;padding:5px 10px;" onclick="document.getElementById('park-master-file').click()">📤 CSV読込</button>
+            <input type="file" id="park-master-file" accept=".csv" style="display:none;" onchange="importParkMasterCsv(event)">
+          </label>
+          <button class="btn-secondary" style="font-size:0.78rem;padding:5px 10px;" onclick="clearParkMaster()">クリア</button>
+        </div>
+      </div>
+      <div style="font-size:0.78rem;color:var(--gray-3);margin-bottom:10px;">
+        プリザンターの公園一覧（児童遊園地一覧など）をエクスポートしたCSVを読み込むと、公園名の入力候補と表記チェックに使われます。複数ファイルを続けて読み込むと統合されます（公園名の列: 児童遊園地名 / 公園名 / タイトル のいずれか）。
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-top:1px dashed var(--gray-2);padding-top:10px;">
+        <button class="btn-accent" style="font-size:0.82rem;padding:6px 12px;" onclick="openParkEditModal()">📝 公園名を一括編集</button>
+        <span style="font-size:0.75rem;color:var(--gray-3);">台帳内の公園名を一覧で確認し、まとめて修正できます</span>
+        <datalist id="park-master-list"></datalist>
+      </div>
+    </div>
+
     <div style="background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:16px;">
 
       <!-- ヘッダー -->
@@ -525,6 +552,54 @@ table.preview-tbl {
 </div>
 
 <!-- ===== トースト ===== -->
+<!-- プリザンター用CSV出力モーダル（v4.0） -->
+<div class="modal-overlay" id="modal-pexport">
+  <div class="modal">
+    <h2>📤 プリザンター用CSV出力</h2>
+    <div style="font-size:0.85rem;color:#555;margin-bottom:10px;">
+      対象: <strong id="pexp-target-label"></strong><br>
+      <span style="color:#92400e;">※取込済みレコードを再度インポートすると重複追加になります。通常は「未出力のみ」を使ってください。</span>
+      <div id="pexp-warn" style="color:#b45309;font-weight:600;margin-top:4px;"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <button class="btn-accent" onclick="runPExport('new')" id="pexp-btn-new">未出力のみ出力（0件）</button>
+      <button class="btn-secondary" onclick="runPExport('all')" id="pexp-btn-all">すべて出力（0件）</button>
+      <button class="btn-secondary" onclick="closeModal('modal-pexport')">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- v4.2: 公園名一括編集モーダル -->
+<div class="modal-overlay" id="modal-parkedit">
+  <div class="modal" style="max-width:560px;">
+    <h2>📝 公園名の一括編集</h2>
+    <div style="font-size:0.78rem;color:#555;margin-bottom:8px;">
+      修正したい行の右の欄に新しい公園名を入力してください（欄をタップすると公園マスタの候補が出ます。文字を入力すると絞り込めます）。表記ゆれの行にはマスタ表記があらかじめ入っています。空欄の行は変更されません。
+    </div>
+    <div id="parkedit-rows" style="max-height:55vh;overflow-y:auto;border:1px solid var(--gray-2);border-radius:6px;padding:6px;margin-bottom:10px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-accent" style="flex:1;" onclick="applyParkEdits()">変更を適用</button>
+      <button class="btn-secondary" style="flex:1;" onclick="closeModal('modal-parkedit')">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- v4.1: JSON復元モード選択モーダル -->
+<div class="modal-overlay" id="modal-restore">
+  <div class="modal">
+    <h2>📥 バックアップの復元方法</h2>
+    <div style="font-size:0.85rem;color:#555;margin-bottom:10px;" id="restore-info"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <button class="btn-accent" onclick="runRestore('replace')">置換復元（今のデータを消して復元・台帳ID維持）</button>
+      <button class="btn-secondary" onclick="runRestore('merge')">統合（同じ台帳IDは上書き・新しいものは追加）</button>
+      <button class="btn-secondary" onclick="closeModal('modal-restore')">キャンセル</button>
+    </div>
+    <div style="font-size:0.75rem;color:#92400e;margin-top:8px;">
+      ※機種変更・復元は「置換復元」を推奨。「統合」は別端末のデータを合流させる用途です。v4.0以前のバックアップ（台帳IDなし）は「置換復元」を使ってください。
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -539,6 +614,7 @@ function quickSetSentei(id, sentei) {
     var rec = req.result;
     if (!rec) return;
     rec.senteiBetsu = sentei;
+    rec.pExportedAt = null; // v4.0: 内容が変わったので未出力に戻す
     store.put(rec).onsuccess = function() {
       loadAndRender();
       toast('✅ ' + sentei + ' に変更しました');
@@ -1196,6 +1272,17 @@ function commitPreview() {
   var valid = parsedRows.filter(function(r) { return r.park && r.species; });
   if (!valid.length) { alert('公園名と樹種が入力されている行が必要です'); return; }
 
+  // v4.1: 公園マスタ照合（同じ公園名は1回だけ確認。キャンセルで登録中止）
+  var parkMap = {}, cancelled = false;
+  valid.forEach(function(r) {
+    if (cancelled || parkMap.hasOwnProperty(r.park)) return;
+    var fixed = confirmParkName(r.park);
+    if (fixed === null) { cancelled = true; return; }
+    parkMap[r.park] = fixed;
+  });
+  if (cancelled) { toast('登録を中止しました'); return; }
+  valid.forEach(function(r) { r.park = parkMap[r.park]; });
+
   var done = 0;
   var now = new Date().toISOString();
   valid.forEach(function(r) {
@@ -1223,6 +1310,8 @@ function saveForm() {
 
   if (!park)    { alert('公園名を入力してください'); return; }
   if (!species) { alert('樹種を入力してください');   return; }
+  park = confirmParkName(park); // v4.1: 公園マスタ照合
+  if (park === null) return;
 
   var unit = '本';
   var rec = normalizeRecord({ park: park, species: species, girth: girth, qty: qty, unit: unit, memo: memo });
@@ -1320,6 +1409,11 @@ function saveEdit() {
   var park    = document.getElementById('e-park').value.trim();
   var species = document.getElementById('e-species').value.trim();
   if (!park || !species) { alert('公園名と樹種は必須です'); return; }
+  park = confirmParkName(park); // v4.1: 公園マスタ照合（表記ゆれ自動修正・不一致警告）
+  if (park === null) return;
+
+  var curRec = null; // v4.1: uid引き継ぎ用に現在のレコードを取得
+  allRecords.forEach(function(r) { if (r.id === id) curRec = r; });
 
   var baseRec = {
     id:          id,
@@ -1332,13 +1426,15 @@ function saveEdit() {
     senteiBetsu: document.getElementById('e-sentei').value || '強剪定',
     specType:    document.getElementById('e-spec-type').value || '', // 手動選択した種別
     photo:       currentPhotoData,
-    date:        new Date().toISOString()
+    date:        new Date().toISOString(),
+    uid:         curRec ? curRec.uid : null  // v4.1: 台帳IDは編集しても変えない
   };
   // normalizeRecordで種別・ランクを再計算
   var rec = normalizeRecord(baseRec);
   rec.id = id; // IDは保持
   // 編集モーダルで明示的に選んだsenteiBetsuを優先（normalizeRecordの自動判定を上書き）
   rec.senteiBetsu = baseRec.senteiBetsu;
+  rec.pExportedAt = null; // v4.0: 編集したレコードは未出力に戻す
   dbPut(rec, function() {
     closeModal('modal-edit');
     loadAndRender();
@@ -1369,11 +1465,19 @@ var allRecords = [];
 
 function loadAndRender() {
   dbGetAll(function(records) {
+    // v4.1: uid未付与の既存レコードに固有IDを振る（初回のみ）
+    var needUid = records.filter(function(r) { return !r.uid; });
+    if (needUid.length) {
+      var mtx = db.transaction(STORE, 'readwrite');
+      var mst = mtx.objectStore(STORE);
+      needUid.forEach(function(r) { r.uid = genUid(); mst.put(r); });
+    }
     allRecords = records;
     updateTabs(records);
     updateStats(records);
     renderCards(records);
     updateDataLists(records);
+    updateParkMasterUI(); // v4.1
   });
 }
 
@@ -1530,6 +1634,7 @@ function renderCards(records) {
       var unitLabel = r.unit || '本';
       metas.push(r.qty + unitLabel);
     }
+    if (r.pExportedAt) metas.push('P出力済'); // v4.0: プリザンター出力済みバッジ
 
     // 剪定種別バッジの色
     var sentei = r.senteiBetsu || '強剪定';
@@ -1566,8 +1671,10 @@ function renderCards(records) {
 
 function updateDataLists(records) {
   var parks = [], species = [];
+  // v4.1: 公園マスタが読み込まれていればマスタ表記を候補の先頭に置く
+  PARK_MASTER.forEach(function(p) { if (parks.indexOf(p.name) < 0) parks.push(p.name); });
   records.forEach(function(r) {
-    if (r.park    && parks.indexOf(r.park)       < 0) parks.push(r.park);
+    if (r.park && parks.indexOf(r.park) < 0 && !findParkMatch(r.park)) parks.push(r.park);
     if (r.species && species.indexOf(r.species)  < 0) species.push(r.species);
   });
   ['park-list','park-list2'].forEach(function(id) {
@@ -1608,6 +1715,383 @@ function exportJSON() {
   });
 }
 
+// =============================================
+//  プリザンター用CSV出力（v4.0）
+//  ・列名はプリザンター側の項目表示名と一字一句一致させること
+//  ・所在地/開設日/学区/学区内番号は出力しない（公園マスタのLookupsで自動入力）
+//  ・出力したレコードに pExportedAt を記録し、既定では未出力のみ出力する
+// =============================================
+
+// 幹周の単一実数のみを数値(cm)として取り出す。範囲(c60-90)・以上以下などは '' を返す
+function parseGirthCm(str) {
+  if (!str) return '';
+  var s = String(str).replace(/\s/g, '').replace(/ｃ/gi, 'c').toUpperCase();
+  var m = s.match(/^C?(\d+\.?\d*)$/);
+  return m ? parseFloat(m[1]) : '';
+}
+
+// CSV 1セルのエスケープ（既存exportCSVと同方式）
+function pCsvCell(v) {
+  var s = String(v == null ? '' : v);
+  return (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0)
+    ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+// レコード配列 → プリザンター取込用CSV文字列
+function buildPleasanterCsv(records) {
+  var header = ['タイトル','公園名','樹種','種別','剪定種別','幹周','幹周ランク','単位','数量','調査日','メモ','台帳ID'];
+  var lines = [header.map(pCsvCell).join(',')];
+  // 公園名→樹種→幹周の順で並べて取込後に確認しやすくする
+  var sorted = records.slice().sort(function(a, b) {
+    return (a.park || '').localeCompare(b.park || '', 'ja')
+        || (a.species || '').localeCompare(b.species || '', 'ja')
+        || (a.girth || '').localeCompare(b.girth || '', 'ja');
+  });
+  sorted.forEach(function(r) {
+    var sb = r.senteiBetsu || '強剪定';
+    // v4.1: タイトルは「樹種 数量単位 公園名」
+    var title = [(r.species || ''), (r.qty ? r.qty + (r.unit || '本') : ''), (r.park || '')]
+      .filter(function(s) { return s; }).join(' ');
+    // 幹周ランクは集計パネルと同じロジックで再計算（剪定種別に応じたランク境界）
+    var rank = normalizeGirthRankBySentei(r.girthRank || r.girth || '', sb);
+    var row = [
+      title,
+      r.park || '',
+      r.species || '',
+      r.specType || '',
+      sb,
+      parseGirthCm(r.girth),
+      rank,
+      r.unit || '本',
+      r.qty || '',
+      r.date ? r.date.slice(0, 10).replace(/-/g, '/') : '',
+      (r.memo || '').replace(/\r?\n/g, ' '),
+      r.uid || r.id  // v4.1: 台帳IDは固有ID（uid）を出力
+    ];
+    lines.push(row.map(pCsvCell).join(','));
+  });
+  return '\uFEFF' + lines.join('\r\n');
+}
+
+// 現在の公園タブに応じた出力対象を返す
+function pExportTargets() {
+  return currentFilter === 'all'
+    ? allRecords
+    : allRecords.filter(function(r) { return r.park === currentFilter; });
+}
+
+function openPExportModal() {
+  var targets = pExportTargets();
+  if (!targets.length) { alert('出力対象のデータがありません'); return; }
+  var newOnes = targets.filter(function(r) { return !r.pExportedAt; });
+  document.getElementById('pexp-target-label').textContent =
+    (currentFilter === 'all' ? 'すべての公園' : currentFilter) + '（全' + targets.length + '件）';
+  document.getElementById('pexp-btn-new').textContent = '未出力のみ出力（' + newOnes.length + '件）';
+  document.getElementById('pexp-btn-all').textContent = 'すべて出力（' + targets.length + '件）';
+  // v4.1: 公園マスタ不一致の警告
+  var warn = document.getElementById('pexp-warn');
+  if (PARK_MASTER.length) {
+    var bad = [];
+    targets.forEach(function(r) { if (!findParkMatch(r.park) && bad.indexOf(r.park) < 0) bad.push(r.park); });
+    warn.textContent = bad.length ? '⚠ 公園マスタ不一致: ' + bad.join('、') + '（取込時に所在地等が自動入力されません）' : '';
+  } else {
+    warn.textContent = '';
+  }
+  document.getElementById('modal-pexport').classList.add('active');
+}
+
+function runPExport(scope) {
+  var targets = pExportTargets();
+  var recs = (scope === 'all') ? targets : targets.filter(function(r) { return !r.pExportedAt; });
+  if (!recs.length) { alert('未出力のレコードがありません'); return; }
+  var csv = buildPleasanterCsv(recs);
+  var parkLabel = (currentFilter === 'all' ? '全公園' : currentFilter).replace(/[\\\/:*?"<>|]/g, '_');
+  dlFile(csv, 'text/csv', 'プリザンター取込_' + parkLabel + '_' + dStr() + '.csv');
+  // 出力済み日時を記録（1トランザクションでまとめて更新）
+  var now = new Date().toISOString();
+  var tx = db.transaction(STORE, 'readwrite');
+  var store = tx.objectStore(STORE);
+  recs.forEach(function(r) { r.pExportedAt = now; store.put(r); });
+  tx.oncomplete = function() {
+    closeModal('modal-pexport');
+    loadAndRender();
+    toast('📤 ' + recs.length + ' 件をプリザンター用CSVで出力しました');
+  };
+  tx.onerror = function() { alert('出力済みフラグの保存に失敗しました（CSV自体はダウンロード済みです）'); };
+}
+
+// =============================================
+//  台帳ID（固有ID）v4.1
+//  作成時に一度だけ振り、編集・バックアップ復元でも変えない
+// =============================================
+function genUid() {
+  return 'T' + Date.now().toString(36).toUpperCase() + '-' +
+    Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+
+// =============================================
+//  公園マスタ（v4.1）
+//  プリザンターの公園一覧CSVを読み込み、入力候補と表記チェックに使う
+//  保存先: localStorage（形式: [{name, pid}]）
+// =============================================
+var PARK_MASTER_KEY = 'tlParkMaster';
+var PARK_MASTER = loadParkMaster();
+
+function loadParkMaster() {
+  try {
+    var raw = localStorage.getItem(PARK_MASTER_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+function saveParkMaster() {
+  try { localStorage.setItem(PARK_MASTER_KEY, JSON.stringify(PARK_MASTER)); }
+  catch(e) { alert('公園マスタの保存に失敗しました: ' + e.message); }
+}
+
+// 照合用キー正規化: 空白除去・全角半角統一・ヶ→ケ・漢数字→算用数字
+function normalizeParkKey(s) {
+  if (!s) return '';
+  var t = String(s).normalize('NFKC').replace(/[\s\u3000]/g, '');
+  t = t.replace(/ヶ/g, 'ケ').replace(/ヵ/g, 'カ');
+  var kan = { '〇':'0','一':'1','二':'2','三':'3','四':'4','五':'5','六':'6','七':'7','八':'8','九':'9' };
+  t = t.replace(/[〇一二三四五六七八九]/g, function(c) { return kan[c]; });
+  return t.toLowerCase();
+}
+
+// マスタと一致する公園を返す（キー一致）。無ければ null
+function findParkMatch(name) {
+  if (!PARK_MASTER.length || !name) return null;
+  var key = normalizeParkKey(name);
+  for (var i = 0; i < PARK_MASTER.length; i++) {
+    if (normalizeParkKey(PARK_MASTER[i].name) === key) return PARK_MASTER[i];
+  }
+  return null;
+}
+
+// 近い候補を最大3件返す（部分一致・前方一致）
+function parkCandidates(name) {
+  var key = normalizeParkKey(name);
+  if (!key) return [];
+  return PARK_MASTER.filter(function(p) {
+    var k = normalizeParkKey(p.name);
+    return k.indexOf(key) >= 0 || key.indexOf(k) >= 0 ||
+      (key.length >= 2 && k.slice(0, 2) === key.slice(0, 2));
+  }).slice(0, 3).map(function(p) { return p.name; });
+}
+
+// 保存前の公園名照合。戻り値: 確定した公園名（キャンセル時は null）
+// ・マスタ未登録なら素通し ・表記ゆれはマスタ表記へ自動修正 ・不一致は確認ダイアログ
+function confirmParkName(park) {
+  if (!PARK_MASTER.length || !park) return park;
+  var hit = findParkMatch(park);
+  if (hit) {
+    if (hit.name !== park) toast('公園名をマスタ表記「' + hit.name + '」に修正しました');
+    return hit.name;
+  }
+  var cands = parkCandidates(park);
+  var msg = '「' + park + '」は公園マスタにありません。\n' +
+    (cands.length ? '近い候補: ' + cands.join(' / ') + '\n' : '') +
+    'このまま保存しますか？（プリザンター取込時に所在地等が自動入力されません）';
+  return confirm(msg) ? park : null;
+}
+
+// CSV 1行パース（ダブルクオート対応）
+function parseCsvLine(line) {
+  var out = [], cur = '', inQ = false;
+  for (var i = 0; i < line.length; i++) {
+    var c = line[i];
+    if (inQ) {
+      if (c === '"') {
+        if (line[i+1] === '"') { cur += '"'; i++; }
+        else inQ = false;
+      } else cur += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ',') { out.push(cur); cur = ''; }
+      else cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+// 文字コード自動判定（UTF-8で化けたらShift_JISで読み直す）
+function decodeCsvBuffer(buf) {
+  var text = new TextDecoder('utf-8').decode(buf);
+  if (text.indexOf('\uFFFD') >= 0) text = new TextDecoder('shift_jis').decode(buf);
+  return text.replace(/^\uFEFF/, '');
+}
+
+function importParkMasterCsv(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var lines = decodeCsvBuffer(e.target.result).split(/\r?\n/).filter(function(l) { return l.trim(); });
+      if (lines.length < 2) { alert('データ行がありません'); return; }
+      var header = parseCsvLine(lines[0]);
+      var nameCol = -1, idCol = -1;
+      ['児童遊園地名', '公園名', 'タイトル'].forEach(function(cand) {
+        if (nameCol < 0) nameCol = header.indexOf(cand);
+      });
+      idCol = header.indexOf('ID');
+      if (nameCol < 0) { alert('公園名の列が見つかりません（児童遊園地名 / 公園名 / タイトル のいずれかが必要です）'); return; }
+      var added = 0, updated = 0;
+      for (var i = 1; i < lines.length; i++) {
+        var cells = parseCsvLine(lines[i]);
+        var name = (cells[nameCol] || '').trim();
+        if (!name) continue;
+        var pid = idCol >= 0 ? (cells[idCol] || '').trim() : '';
+        var hit = findParkMatch(name);
+        if (hit) { hit.name = name; if (pid) hit.pid = pid; updated++; }
+        else { PARK_MASTER.push({ name: name, pid: pid }); added++; }
+      }
+      saveParkMaster();
+      updateParkMasterUI();
+      updateDataLists(allRecords);
+      toast('🏞 公園マスタ: ' + added + ' 件追加・' + updated + ' 件更新（計' + PARK_MASTER.length + '件）');
+    } catch(err) { alert('読み込み失敗: ' + err.message); }
+  };
+  reader.readAsArrayBuffer(file);
+  event.target.value = '';
+}
+
+function clearParkMaster() {
+  if (!PARK_MASTER.length) return;
+  if (!confirm('公園マスタ（' + PARK_MASTER.length + '件）をクリアしますか？\n台帳のレコード自体は消えません。')) return;
+  PARK_MASTER = [];
+  saveParkMaster();
+  updateParkMasterUI();
+  updateDataLists(allRecords);
+  toast('公園マスタをクリアしました');
+}
+
+function updateParkMasterUI() {
+  var st = document.getElementById('park-master-status');
+  if (st) st.textContent = PARK_MASTER.length ? PARK_MASTER.length + ' 件登録済み' : '未登録';
+  // v4.2: 一括編集モーダルの入力候補（datalist。文字入力で絞り込める）
+  var dl = document.getElementById('park-master-list');
+  if (dl) dl.innerHTML = PARK_MASTER.map(function(p) {
+    return '<option value="' + escAttr(p.name) + '">';
+  }).join('');
+}
+
+// v4.2: 公園名一括編集モーダル
+function openParkEditModal() {
+  if (!allRecords.length) { alert('台帳にデータがありません'); return; }
+  var counts = {};
+  allRecords.forEach(function(r) { if (r.park) counts[r.park] = (counts[r.park] || 0) + 1; });
+  var parks = Object.keys(counts).sort(function(a, b) { return a.localeCompare(b, 'ja'); });
+  var html = parks.map(function(p) {
+    var status = '', prefill = '';
+    if (PARK_MASTER.length) {
+      var hit = findParkMatch(p);
+      if (hit && hit.name === p) status = '<span style="color:#2d6a4f;">✔ マスタ一致</span>';
+      else if (hit) { status = '<span style="color:#b45309;">⚠ 表記ゆれ → ' + escHtml(hit.name) + '</span>'; prefill = hit.name; }
+      else status = '<span style="color:#d64040;">✖ マスタ不一致</span>';
+    }
+    return '<div style="display:flex;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px dashed var(--gray-2);">'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-weight:600;font-size:0.85rem;overflow-wrap:anywhere;">' + escHtml(p)
+      + ' <span style="color:#888;font-weight:normal;">(' + counts[p] + '件)</span></div>'
+      + (status ? '<div style="font-size:0.72rem;">' + status + '</div>' : '')
+      + '</div>'
+      + '<input list="park-master-list" class="parkedit-input" data-orig="' + escAttr(p) + '" value="' + escAttr(prefill) + '"'
+      + ' placeholder="修正先" style="flex:1;min-width:0;padding:7px 8px;border:1.5px solid var(--gray-2);border-radius:6px;font-size:0.85rem;font-family:inherit;">'
+      + '</div>';
+  }).join('');
+  document.getElementById('parkedit-rows').innerHTML = html;
+  document.getElementById('modal-parkedit').classList.add('active');
+}
+
+function applyParkEdits() {
+  var changes = [];
+  document.querySelectorAll('.parkedit-input').forEach(function(inp) {
+    var from = inp.getAttribute('data-orig');
+    var to = inp.value.trim();
+    if (to && to !== from) changes.push({ from: from, to: to });
+  });
+  if (!changes.length) { alert('変更がありません（修正先が入力された行だけ適用されます）'); return; }
+  var total = 0, unmatched = [];
+  changes.forEach(function(c) {
+    total += allRecords.filter(function(r) { return r.park === c.from; }).length;
+    if (PARK_MASTER.length && !findParkMatch(c.to)) unmatched.push(c.to);
+  });
+  var msg = changes.length + ' 公園名・計 ' + total + ' 件のレコードを変更します。\n'
+    + changes.map(function(c) { return '「' + c.from + '」→「' + c.to + '」'; }).join('\n')
+    + (unmatched.length ? '\n⚠ マスタ不一致のまま: ' + unmatched.join('、') : '')
+    + '\nよろしいですか？';
+  if (!confirm(msg)) return;
+  var tx = db.transaction(STORE, 'readwrite');
+  var store = tx.objectStore(STORE);
+  changes.forEach(function(c) {
+    allRecords.forEach(function(r) {
+      if (r.park !== c.from) return;
+      r.park = c.to;
+      r.pExportedAt = null; // 内容が変わったので未出力に戻す
+      store.put(r);
+    });
+    if (currentFilter === c.from) currentFilter = c.to;
+  });
+  tx.oncomplete = function() {
+    closeModal('modal-parkedit');
+    loadAndRender();
+    updateParkMasterUI();
+    toast('✅ ' + changes.length + ' 公園名・' + total + ' 件を変更しました');
+  };
+  tx.onerror = function() { alert('変更に失敗しました'); };
+}
+
+// =============================================
+//  JSONバックアップ復元（v4.1: 置換復元 / 統合）
+// =============================================
+var pendingRestoreList = null;
+
+function runRestore(mode) {
+  var list = pendingRestoreList;
+  if (!list) { closeModal('modal-restore'); return; }
+  var tx = db.transaction(STORE, 'readwrite');
+  var store = tx.objectStore(STORE);
+  var added = 0, overwritten = 0;
+
+  if (mode === 'replace') {
+    store.clear();
+    list.forEach(function(r) {
+      var rec = Object.assign({}, r);
+      if (!rec.uid) rec.uid = genUid();
+      store.put(rec); // idごと復元 → 台帳ID・内部IDとも維持
+      added++;
+    });
+  } else {
+    // 統合: 台帳ID（uid）が同じレコードは上書き、無ければ新規追加
+    var byUid = {};
+    allRecords.forEach(function(r) { if (r.uid) byUid[r.uid] = r; });
+    list.forEach(function(r) {
+      var rec = Object.assign({}, r);
+      if (rec.uid && byUid[rec.uid]) {
+        rec.id = byUid[rec.uid].id;
+        store.put(rec);
+        overwritten++;
+      } else {
+        delete rec.id;
+        if (!rec.uid) rec.uid = genUid();
+        store.add(rec);
+        added++;
+      }
+    });
+  }
+  tx.oncomplete = function() {
+    pendingRestoreList = null;
+    closeModal('modal-restore');
+    loadAndRender();
+    toast(mode === 'replace'
+      ? '📥 置換復元しました（' + added + ' 件）'
+      : '📥 統合しました（追加 ' + added + ' 件・上書き ' + overwritten + ' 件）');
+  };
+  tx.onerror = function() { alert('復元に失敗しました'); };
+}
+
 function importJSON(event) {
   var file = event.target.files[0];
   if (!file) return;
@@ -1617,17 +2101,11 @@ function importJSON(event) {
       var data = JSON.parse(e.target.result);
       var list = data.records || (Array.isArray(data) ? data : null);
       if (!list) { alert('形式が正しくありません'); return; }
-      if (!confirm(list.length + ' 件をインポートします。よろしいですか？')) return;
-      var done = 0;
-      var tx = db.transaction(STORE, 'readwrite');
-      var store = tx.objectStore(STORE);
-      list.forEach(function(r) {
-        var rec = Object.assign({}, r); delete rec.id;
-        store.add(rec).onsuccess = function() {
-          done++;
-          if (done === list.length) { loadAndRender(); toast('📥 ' + done + ' 件インポート'); }
-        };
-      });
+      // v4.1: 復元方法をモーダルで選択（従来の無条件追加は重複と台帳ID変化の原因だった）
+      pendingRestoreList = list;
+      document.getElementById('restore-info').textContent =
+        'バックアップ: ' + list.length + ' 件 ／ 現在のデータ: ' + allRecords.length + ' 件';
+      document.getElementById('modal-restore').classList.add('active');
     } catch(err) { alert('読み込み失敗: ' + err.message); }
   };
   reader.readAsText(file);
@@ -1898,7 +2376,9 @@ function normalizeRecord(r) {
     unit:        r.unit  || '本',
     memo:        r.memo  || '',
     photo:       r.photo || null,
-    date:        r.date  || new Date().toISOString()
+    date:        r.date  || new Date().toISOString(),
+    uid:         r.uid || genUid(),     // v4.1: 台帳ID（作成時に一度だけ振る固有ID。編集・復元でも不変）
+    pExportedAt: r.pExportedAt || null  // v4.0: プリザンター出力済み日時（未出力=null）
   };
 }
 
@@ -2220,7 +2700,7 @@ if ('serviceWorker' in navigator) {
 </script>
 
 <footer style="text-align:center;padding:18px;font-size:0.7rem;color:var(--gray-3);border-top:1px solid var(--gray-2);margin-top:40px">
-  樹木台帳メモ v3.2 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
+  樹木台帳メモ v4.2 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
 </footer>
 </body>
 </html>
