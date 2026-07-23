@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>樹木台帳メモ v4.2</title>
+<title>樹木台帳メモ v4.4</title>
 
 <!-- PWA メタタグ -->
 <meta name="theme-color" content="#1a3a2a">
@@ -503,8 +503,15 @@ table.preview-tbl {
         <select id="e-unit-sel" style="width:100%;padding:8px 9px;border:1.5px solid var(--gray-2);border-radius:6px;font-family:inherit;font-size:0.88rem;background:var(--gray-1);">
           <option value="本">本</option>
           <option value="m2">m2</option>
+          <option value="m">m</option>
           <option value="株">株</option>
         </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>計上区分 <small style="font-weight:normal;color:#888">（発注用・任意）</small></label>
+        <select id="e-keijo" onchange="onKeijoChange()" style="width:100%;padding:8px 9px;border:1.5px solid var(--gray-2);border-radius:6px;font-family:inherit;font-size:0.88rem;background:var(--gray-1);"></select>
       </div>
     </div>
     <div class="form-row">
@@ -1372,6 +1379,17 @@ function clearPhoto(e) {
   document.getElementById('e-photo').value = '';
 }
 
+// v4.3: 計上区分を選んだら単位を自動セット（本/m2/m/株）
+function onKeijoChange() {
+  var name = document.getElementById('e-keijo').value;
+  for (var i = 0; i < KEIJO_KUBUN.length; i++) {
+    if (KEIJO_KUBUN[i].name === name && KEIJO_KUBUN[i].unit) {
+      document.getElementById('e-unit-sel').value = KEIJO_KUBUN[i].unit;
+      break;
+    }
+  }
+}
+
 // =============================================
 //  編集モーダル
 // =============================================
@@ -1385,6 +1403,13 @@ function openEditModal(rec) {
   // 単位セレクト
   var unitSel = document.getElementById('e-unit-sel');
   unitSel.value = rec.unit || '本';
+  // 計上区分セレクトを構築（v4.3）
+  var kjSel = document.getElementById('e-keijo');
+  kjSel.innerHTML = KEIJO_KUBUN.map(function(k) {
+    var label = k.name ? k.name + '（' + k.unit + '）' : '（未設定）';
+    return '<option value="' + escAttr(k.name) + '">' + escHtml(label) + '</option>';
+  }).join('');
+  kjSel.value = rec.keijoKubun || '';
   // 樹木種別（自動判定済み値を表示。手動変更可）
   var stSel = document.getElementById('e-spec-type');
   stSel.value = rec.specType || '';
@@ -1425,6 +1450,7 @@ function saveEdit() {
     memo:        document.getElementById('e-memo').value.trim(),
     senteiBetsu: document.getElementById('e-sentei').value || '強剪定',
     specType:    document.getElementById('e-spec-type').value || '', // 手動選択した種別
+    keijoKubun:  document.getElementById('e-keijo').value || '',       // v4.3: 計上区分
     photo:       currentPhotoData,
     date:        new Date().toISOString(),
     uid:         curRec ? curRec.uid : null  // v4.1: 台帳IDは編集しても変えない
@@ -1463,14 +1489,44 @@ document.querySelectorAll('.modal-overlay').forEach(function(el) {
 var currentFilter = 'all';
 var allRecords = [];
 
+// v4.3: 計上区分の初期値を推定（既存レコード移行用）
+// 【推定】あくまで初期値。実データに合わせて後から一括編集で直せる。
+function guessKeijoKubun(r) {
+  var unit = r.unit || '本';
+  if (unit === 'm2') return '低木(機)寄植え';
+  if (unit === '株') return '低木玉物(手刈)';
+  if (unit === 'm')  return '刈込(生垣)機械';
+  if (unit === '本') {
+    if (r.senteiBetsu === '伐採') return '樹木伐採';
+    if (r.specType === '落葉広葉樹' || r.specType === '常緑広葉樹' || r.specType === '針葉樹') return '高木剪定';
+    // 本＋低木は単木か寄植えか機械判断できないため空欄（要手動確認）
+  }
+  return '';
+}
+
 function loadAndRender() {
   dbGetAll(function(records) {
-    // v4.1: uid未付与の既存レコードに固有IDを振る（初回のみ）
-    var needUid = records.filter(function(r) { return !r.uid; });
-    if (needUid.length) {
+    // v4.1/v4.3: 既存レコードの移行（初回のみ／変更があった行だけ書き戻す）
+    var changed = [];
+    records.forEach(function(r) {
+      var dirty = false;
+      if (!r.uid) { r.uid = genUid(); dirty = true; }                 // v4.1: 台帳ID付与
+      if (!r.specType) {                                              // v4.3: 種別の空欄をマスタ補完
+        var code = getSpeciesType(r.species || '');
+        var lbl = code === 'E' ? '常緑広葉樹' : code === 'D' ? '落葉広葉樹'
+                : code === 'C' ? '針葉樹'     : code === 'L' ? '低木' : '';
+        if (lbl) { r.specType = lbl; dirty = true; }
+      }
+      if (!r.hasOwnProperty('keijoKubun')) {                          // v4.3: 計上区分の初期値を推定
+        r.keijoKubun = guessKeijoKubun(r);
+        dirty = true;
+      }
+      if (dirty) changed.push(r);
+    });
+    if (changed.length) {
       var mtx = db.transaction(STORE, 'readwrite');
       var mst = mtx.objectStore(STORE);
-      needUid.forEach(function(r) { r.uid = genUid(); mst.put(r); });
+      changed.forEach(function(r) { mst.put(r); });
     }
     allRecords = records;
     updateTabs(records);
@@ -1739,7 +1795,7 @@ function pCsvCell(v) {
 
 // レコード配列 → プリザンター取込用CSV文字列
 function buildPleasanterCsv(records) {
-  var header = ['タイトル','公園名','樹種','種別','剪定種別','幹周','幹周ランク','単位','数量','調査日','メモ','台帳ID'];
+  var header = ['タイトル','公園名','樹種','種別','剪定種別','幹周','幹周ランク','単位','数量','調査日','メモ','台帳ID','計上区分'];
   var lines = [header.map(pCsvCell).join(',')];
   // 公園名→樹種→幹周の順で並べて取込後に確認しやすくする
   var sorted = records.slice().sort(function(a, b) {
@@ -1766,7 +1822,8 @@ function buildPleasanterCsv(records) {
       r.qty || '',
       r.date ? r.date.slice(0, 10).replace(/-/g, '/') : '',
       (r.memo || '').replace(/\r?\n/g, ' '),
-      r.uid || r.id  // v4.1: 台帳IDは固有ID（uid）を出力
+      r.uid || r.id,  // v4.1: 台帳IDは固有ID（uid）を出力
+      r.keijoKubun || ''  // v4.3: 計上区分（末尾追加。既存列は不変）
     ];
     lines.push(row.map(pCsvCell).join(','));
   });
@@ -2150,6 +2207,24 @@ function toast(msg) {
 }
 
 // =============================================
+//  計上区分マスタ（v4.3）
+//  見積査定システムの単価マスタ「種類」に準拠。発注時の区分を表す任意項目。
+//  剪定種別（強/軽/伐採）は別列なので、ここには含めない。
+// =============================================
+var KEIJO_KUBUN = [
+  { name: '', unit: '' },                       // 未設定
+  { name: '高木剪定',        unit: '本' },
+  { name: 'マツ仕立て',      unit: '本' },
+  { name: '樹木伐採',        unit: '本' },
+  { name: '低木(機)寄植え',  unit: 'm2' },
+  { name: '低木(手刈)寄植え', unit: 'm2' },
+  { name: '刈込(生垣)機械',  unit: 'm' },
+  { name: '生垣手刈り',      unit: 'm' },
+  { name: '低木玉物(手刈)',  unit: '株' },
+  { name: 'フジ棚(冬季)',    unit: 'm2' }
+];
+
+// =============================================
 //  樹種マスタ（種別判定）
 //  種別: 'E'=常緑広葉樹, 'D'=落葉広葉樹, 'C'=針葉樹, 'L'=低木
 //  メモの「伐採」がある場合は工種=樹木伐採として別集計
@@ -2186,7 +2261,7 @@ var SPECIES_MASTER = {
   'モミ':'C','ツガ':'C','トドマツ':'C','エゾマツ':'C',
   // v3.2 追加分
   'ツバキ':'E','ヒメユズリハ':'E','キョウチクトウ':'E','ナワシログミ':'E',
-  'ハゼノキ':'D','アカメガシワ':'D',
+  'ハゼノキ':'D','アカメガシワ':'D','タイワンフウ':'D',
   'ツゲ':'L',
   'ヒマラヤスギ':'C',
 };
@@ -2371,6 +2446,7 @@ function normalizeRecord(r) {
     girth:       r.girth  || '',      // 元の入力値（参照用）
     girthRank:   girthRank,           // 正規化済みランク C=60-90 など
     specType:    specTypeLabel,       // 落葉広葉樹 など
+    keijoKubun:  r.keijoKubun || '',  // v4.3: 計上区分（発注用・任意。空欄可）
     senteiBetsu: senteiBetsu,         // 強剪定 / 軽剪定 / 伐採
     qty:         parseFloat(r.qty) || 1,
     unit:        r.unit  || '本',
@@ -2700,7 +2776,7 @@ if ('serviceWorker' in navigator) {
 </script>
 
 <footer style="text-align:center;padding:18px;font-size:0.7rem;color:var(--gray-3);border-top:1px solid var(--gray-2);margin-top:40px">
-  樹木台帳メモ v4.2 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
+  樹木台帳メモ v4.4 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
 </footer>
 </body>
 </html>
