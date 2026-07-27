@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>樹木台帳メモ v4.4</title>
+<title>樹木台帳メモ v4.5</title>
 
 <!-- PWA メタタグ -->
 <meta name="theme-color" content="#1a3a2a">
@@ -307,7 +307,7 @@ table.preview-tbl {
       <div class="form-row">
         <div class="form-group">
           <label>幹周ランク</label>
-          <input type="text" id="f-girth" placeholder="例: c60-90">
+          <input type="text" id="f-girth" placeholder="例: c60-90 / 株立 c100+50+80">
         </div>
         <div class="form-group">
           <label>数量 (本)</label>
@@ -1091,6 +1091,11 @@ function parseLine(line, park) {
   //    c値が2つある場合: 最初を実測幹周(girth)、2番目をメモへ
   //    c値が1つだけの場合: その値を幹周に使用
   // -------------------------------------------------------
+  // v4.5: 株立記法（c100+50+80）を先に処理する
+  //  各幹の値が c値スキャン・残余メモに混ざらないよう、行から取り除く
+  var kabu = parseKabudachi(line);
+  if (kabu) line = line.replace(kabu.matched, ' ');
+
   // c付きの値をすべて抽出（順序保持）
   var cAll = [];
   var cScanRe = /[cCｃＣ]\s*[\d.]+\s*(?:[-‐–]\s*[\d.]+)?(?:\s*(?:以上|以下))?/gi;
@@ -1112,7 +1117,9 @@ function parseLine(line, park) {
   // girthは最初のc値、または h値、またはcなし数字範囲
   var girth = '';
   var girthExtra = ''; // 2番目以降のc値（メモへ）
-  if (cAll.length >= 1) {
+  if (kabu) {
+    girth = kabu.girth; // v4.5: 株立の換算値（合計×0.7 切り捨て）
+  } else if (cAll.length >= 1) {
     girth = cAll[0];
     if (cAll.length >= 2) {
       // 2番目以降はメモへ（c80 c60-90 の場合: girth=c80、extra=c60-90）
@@ -1175,6 +1182,9 @@ function parseLine(line, park) {
   // 規格に使わなかった裸h（実測値）はメモに保持
   var hKeep = hBareUsed ? hBare.slice(1) : hBare;
   if (hKeep.length) memoParts.push(hKeep.map(function(t){ return t + '(実測)'; }).join(' '));
+
+  // v4.5: 株立の内訳（例: 株立 c100+c50+c80 → c161）
+  if (kabu) memoParts.push(kabu.note);
 
   // 2番目以降のc値（規格ランク等）
   if (girthExtra) memoParts.push(girthExtra);
@@ -2397,6 +2407,44 @@ function stripNote(memo) {
 }
 // 伐採判定: 「伐採含む」「伐採済(み)」「〜で伐採」「〜から伐採」は
 // 剪定行の注記なので除外してから「伐採」を探す（伐採行は「伐採」単独表記）
+// =============================================
+//  株立の幹周計算（v4.5）
+//  記法: c100+50+80 または c100+c50+c80（全角＋・全角ｃも可）
+//  計算: (各幹の幹周の合計) × 0.7、小数は切り捨て
+//  例: (100+50+80)×0.7 = 161 → c161
+//  呼び出し: parseLine（テキスト一括入力）/ normalizeRecord（フォーム・編集）
+// =============================================
+var KABUDACHI_RATE = 0.7;
+var KABUDACHI_RE = /[cCｃＣ]\s*[\d.]+(?:\s*[+＋]\s*[cCｃＣ]?\s*[\d.]+)+/;
+
+function parseKabudachi(str) {
+  if (!str) return null;
+  var m = String(str).match(KABUDACHI_RE);
+  if (!m) return null;
+  // 空白・全角記号を正規化してから「+」で分解
+  var body = m[0].replace(/[　\s]/g, '').replace(/＋/g, '+').replace(/[ｃＣC]/g, 'c');
+  var parts = body.split('+');
+  var stems = [];
+  for (var i = 0; i < parts.length; i++) {
+    var n = parseFloat(parts[i].replace(/c/g, ''));
+    if (isNaN(n) || n <= 0) return null; // 1つでも読めない値があれば株立と見なさない
+    stems.push(n);
+  }
+  if (stems.length < 2) return null;
+  var sum = 0;
+  for (var j = 0; j < stems.length; j++) sum += stems[j];
+  // 切り捨て。JSの誤差（例: 90×0.7=62.99999…）で1cm小さくならないよう丸めてから切り捨てる
+  var total = Math.floor(parseFloat((sum * KABUDACHI_RATE).toFixed(6)));
+  if (total <= 0) return null;
+  return {
+    matched: m[0],                 // 元テキスト中の該当箇所（行からの除去用）
+    stems:   stems,                // 各幹の幹周
+    total:   total,                // 換算後の幹周(cm)
+    girth:   'c' + total,          // 幹周欄に入れる値
+    note:    '株立 ' + stems.map(function(v) { return 'c' + v; }).join('+') + ' → c' + total
+  };
+}
+
 function hasBassai(memo) {
   var m = stripNote(memo)
     .replace(/伐採含む/g, '')
@@ -2416,11 +2464,21 @@ function isKeiSentei(memo) {
 //  呼び出し: commitPreview / saveForm / saveEdit
 // =============================================
 function normalizeRecord(r) {
+  // v4.5: 幹周欄に株立記法（c100+50+80）が入っていれば換算値に置き換え、内訳をメモへ追記
+  //  テキスト一括入力は parseLine で処理済みのため、ここでは二重計算にならない
+  var girthIn = r.girth || '';
+  var memoIn  = r.memo  || '';
+  var kabu = parseKabudachi(girthIn);
+  if (kabu) {
+    girthIn = kabu.girth;
+    if (memoIn.indexOf(kabu.note) < 0) memoIn = memoIn ? memoIn + ' / ' + kabu.note : kabu.note;
+  }
+
   // 剪定種別を先に確定（優先順位: 伐採 > 軽剪定キーワード > 強剪定）
-  var sb = r.senteiBetsu || (isKeiSentei(r.memo) ? '軽剪定' : '強剪定');
-  if (hasBassai(r.memo)) sb = '伐採';
+  var sb = r.senteiBetsu || (isKeiSentei(memoIn) ? '軽剪定' : '強剪定');
+  if (hasBassai(memoIn)) sb = '伐採';
   // 幹周ランクを剪定種別に応じて正規化 (c80+強剪定 → C=60-90 など)
-  var girthRank = normalizeGirthRankBySentei(r.girth || '', sb);
+  var girthRank = normalizeGirthRankBySentei(girthIn, sb);
 
   // 種別ラベル: 引数に specType が明示されていればそれを優先
   // （編集モーダルで手動選択した値 → 自動判定で上書きしない）
@@ -2443,14 +2501,14 @@ function normalizeRecord(r) {
   return {
     park:        (r.park  || '').trim(),
     species:     (r.species || '').trim(),
-    girth:       r.girth  || '',      // 元の入力値（参照用）
+    girth:       girthIn,             // 入力値（株立記法は換算済み）
     girthRank:   girthRank,           // 正規化済みランク C=60-90 など
     specType:    specTypeLabel,       // 落葉広葉樹 など
     keijoKubun:  r.keijoKubun || '',  // v4.3: 計上区分（発注用・任意。空欄可）
     senteiBetsu: senteiBetsu,         // 強剪定 / 軽剪定 / 伐採
     qty:         parseFloat(r.qty) || 1,
     unit:        r.unit  || '本',
-    memo:        r.memo  || '',
+    memo:        memoIn,
     photo:       r.photo || null,
     date:        r.date  || new Date().toISOString(),
     uid:         r.uid || genUid(),     // v4.1: 台帳ID（作成時に一度だけ振る固有ID。編集・復元でも不変）
@@ -2776,7 +2834,7 @@ if ('serviceWorker' in navigator) {
 </script>
 
 <footer style="text-align:center;padding:18px;font-size:0.7rem;color:var(--gray-3);border-top:1px solid var(--gray-2);margin-top:40px">
-  樹木台帳メモ v4.4 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
+  樹木台帳メモ v4.5 &nbsp;|&nbsp; © 2026 Koh Kitsukawa. All rights reserved.
 </footer>
 </body>
 </html>
